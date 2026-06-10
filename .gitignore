@@ -1,0 +1,15 @@
+# Reaper artifacts (when we add templates/scripts later)
+*.rpp-bak
+*.RPP-bak
+*-reapeaks
+*.reapeaks
+
+# Backups we create before touching live Reaper files
+*.bak
+backups/
+
+# OS / editor cruft
+.DS_Store
+*~
+.idea/
+.vscode/
