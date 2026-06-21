@@ -1,0 +1,35 @@
+desc:Super505 Mixdown (fold loop outputs ch1-8 to stereo)
+
+// Super505 (like Super8) plays each loop on its OWN output channel, so on a
+// normal stereo master only loops on channels 1-2 are audible. Insert this
+// AFTER super505 on the looper track: it sums all loop channels down to
+// channels 1/2 so every loop is heard, and zeroes channels 3-8.
+// Additive; part of the Super505 rig (see Super505 repo).
+
+in_pin:in 1
+in_pin:in 2
+in_pin:in 3
+in_pin:in 4
+in_pin:in 5
+in_pin:in 6
+in_pin:in 7
+in_pin:in 8
+out_pin:out L
+out_pin:out R
+out_pin:out 3
+out_pin:out 4
+out_pin:out 5
+out_pin:out 6
+out_pin:out 7
+out_pin:out 8
+
+slider1:mixgain=0<-12,12,0.1>-Mix gain (dB)
+
+@slider
+g = 10^(mixgain/20);
+
+@sample
+mix = (spl0 + spl1 + spl2 + spl3 + spl4 + spl5 + spl6 + spl7) * g;
+spl0 = mix;
+spl1 = mix;
+spl2 = spl3 = spl4 = spl5 = spl6 = spl7 = 0;
