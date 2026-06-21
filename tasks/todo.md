@@ -107,5 +107,14 @@ Additive only. Back up any existing Reaper file (`.bak`) before touching. super8
 ## Risks to validate live
 sysex/`midisend_str` from JSFX; LED update rate; exact palette indices; Reaper ALSA-vs-JACK port name; UR22C latency under PipeWire.
 
-## Review
-_(filled in after implementation)_
+## Review / session checkpoint (2026-06-21)
+
+Core looper works end-to-end (5 columns, rec/overdub/play/stop/clear, LEDs, audio
+in→loops→mixdown→master, count-in, low latency). Full status, architecture, runtime
+gotchas, and the open design questions are documented in
+**`docs/06-build-progress-and-design.md`** — the cold-resume reference.
+
+**Main thing to discuss next session:** the loop-length model (per-channel `div`
+subdivisions of a shared master length vs. truly independent lengths) — doc 06 §7.
+Then: multi-instrument template (drum/gtr1/gtr2/mic → ch1–4), per-track volume/mute,
+save `.rpp` template, utility row, git push (HTTPS→SSH).

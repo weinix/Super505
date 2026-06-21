@@ -78,6 +78,7 @@ options: maxmem=<? printf("%d",maxmem*1024*128); ?> no_meter gfx_idle prealloc=*
 
 slider1:g_slider_sync=0<0,2,1{off,project,playback}>-Sync
 slider4:g_slider_click_cnt=0<0,64,1>-Click count/length
+slider5:g_countin=0<0,8,1>-Count-in beats (at project tempo)
 
 @init
 
@@ -419,9 +420,24 @@ function onmsg(m1,m2,m3) instance(rec,note,note2,note3,note4)
      this.chan_clear();
    );
    newstate >= 0 ? (
-     this.setstate(newstate);
-     setstate_for_rec(get_linked_rec(this.idx), newstate);
-     g_chan_selected = this.idx;
+     // Super505 count-in: a press on the channel that is counting cancels it
+     (g_ci_active && this.idx == g_ci_chan) ? (
+       g_ci_active = 0; g_ci_chan = -1;
+     ) :
+     // arm a count-in (instead of recording now) when starting a fresh empty loop
+     (newstate == 2 && rec[st_state] == 0 && rec[st_dirty] == 0 && g_countin > 0 && g_ci_active == 0) ? (
+       g_ci_active = 1;
+       g_ci_chan = this.idx;
+       g_ci_beat_len = (srate * 60 / max(tempo,1))|0;
+       g_ci_samples_left = g_countin * g_ci_beat_len;
+       g_ci_next_click = 0;
+       g_ci_click_env = 0;
+       g_chan_selected = this.idx;
+     ) : (
+       this.setstate(newstate);
+       setstate_for_rec(get_linked_rec(this.idx), newstate);
+       g_chan_selected = this.idx;
+     );
    );
 );
 
@@ -623,6 +639,15 @@ ext_noinit == 0 ? (
 g_s505_phase = 0;
 g_s505_t = 0;
 
+// Super505 count-in state (reset each @init)
+g_ci_active = 0;
+g_ci_chan = -1;
+g_ci_samples_left = 0;
+g_ci_beat_len = 0;
+g_ci_next_click = 0;
+g_ci_click_env = 0;
+g_ci_click_phase = 0;
+
 @slider
 cfgp_sync[] != floor(g_slider_sync+0.5) ? (
   cfgp_sync[] = floor(g_slider_sync+0.5);
@@ -795,7 +820,9 @@ g_s505_phase >= 1 ? (
   loop(min(g_nchan,5),
     s505_rec = mem_stlist + s505_i*st_num;
     s505_st  = s505_rec[st_state];
-    s505_st == 2 ? (                                  // recording / overdub
+    (g_ci_active && s505_i == g_ci_chan) ? (          // counting in -> amber flash
+      s505_col = C_AMBER; s505_ch = 1;
+    ) : s505_st == 2 ? (                              // recording / overdub
       (g_firstrec == 1 + s505_i) ? (
         s505_col = C_RED; s505_ch = 1;                // first pass: defining loop -> red flash (ch2)
       ) : (
@@ -919,6 +946,28 @@ g_chan_selected >= 0 ? (
 g_pos >= g_length && g_firstrec == 0 ? g_pos = 0;
 
 <? loop(x=0;nch, printf("spl%d=ch%d.process(spl%d);\n",x,x+1,x);x+=1) ?>
+
+// ---- Super505 count-in: click g_countin beats at project tempo, then record ----
+g_ci_active ? (
+  g_ci_next_click <= 0 ? (                  // start a new click blip each beat
+    g_ci_click_env = 1.0;
+    g_ci_click_phase = 0;
+    g_ci_next_click += g_ci_beat_len;
+  );
+  g_ci_next_click -= 1;
+  g_ci_click_env > 0.0001 ? (
+    g_ci_click_phase += 1500 * i_srate;     // ~1.5 kHz metronome click
+    g_ci_out = tonegen(g_ci_click_phase) * g_ci_click_env * 0.3;
+    spl0 += g_ci_out;                        // onto ch1/2 so the mixdown makes it audible
+    spl1 += g_ci_out;
+    g_ci_click_env *= 0.992;                 // ~20 ms decay
+  );
+  (g_ci_samples_left -= 1) <= 0 ? (          // count-in done -> start recording now
+    setstate_for_rec(mem_stlist + g_ci_chan*st_num, 2);
+    g_ci_active = 0;
+    g_ci_chan = -1;
+  );
+);
 
 g_prevent_processing===0 ? (
   g_click_int > 0 && g_active_mask && g_length > 0 && !g_firstrec ? (
@@ -1479,7 +1528,7 @@ function draw_position(ypos) local(last_pos,last_len)
   );
 );
 
-function draw_topbar(need_ref) local(s,i,t, lastlen, lastgate, lastlatch, lastclickcount, lastvclickoffs, lastoffs, lastsync)
+function draw_topbar(need_ref) local(s,i,t, lastlen, lastgate, lastlatch, lastclickcount, lastvclickoffs, lastoffs, lastsync, lastcountin)
 (
   need_ref == 0 ? (
     need_ref = (lastlen != g_length || 
@@ -1488,6 +1537,7 @@ function draw_topbar(need_ref) local(s,i,t, lastlen, lastgate, lastlatch, lastcl
                 lastgate != cfgp_gate[] || 
                 lastlatch != g_latchmode ||
                 lastclickcount != (cfgp_clickcnt[]|0) ||
+                lastcountin != g_countin ||
                 lastvclickoffs != cfgp_vclick[]);
   );
 
@@ -1523,6 +1573,9 @@ function draw_topbar(need_ref) local(s,i,t, lastlen, lastgate, lastlatch, lastcl
     lastsync == 0 ?  gate_button.draw_topbar_button(gfx_x+4,2,cfgp_gate[] < g_infthreshdb ? "gate: -inf dB" : sprintf(#,"gate: %.0fdB",lastgate));
 
     latch_button.draw_topbar_button(gfx_x+4,2, (lastlatch=g_latchmode) ? "latch on" : "latch off");
+
+    lastcountin = g_countin;
+    countin_button.draw_topbar_button(gfx_x+4,2, g_countin>0 ? sprintf(#,"count-in: %d", g_countin) : "count-in: off");
   );
   
   (mouse_cap&1) && !(mouse_cap&2) ? ( 
@@ -1535,6 +1588,9 @@ function draw_topbar(need_ref) local(s,i,t, lastlen, lastgate, lastlatch, lastcl
       ) : latch_button.hit_topbar_button(mouse_x,mouse_y,-1) ? (
         // toggle
         cfgp_latch[] = g_latchmode = !g_latchmode;
+      ) : countin_button.hit_topbar_button(mouse_x,mouse_y,-1) ? (
+        g_countin = (g_countin+1)%9;       // cycle 0..8 count-in beats
+        slider_automate(g_countin);
       ) : (
         (lastsync==0 && (gate_button.hit_topbar_button(mouse_x,mouse_y,cfgp_gate)||
                          length_button.hit_topbar_button(mouse_x,mouse_y,cfgp_length)||

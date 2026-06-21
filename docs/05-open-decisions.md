@@ -29,7 +29,19 @@ Clear on Row 3.
 - **MVP: Clear All only.** Map one pad to Super8's existing global "kill" now, add
   true per-track clear later.
 
-**Your answer:** _pending — to confirm when Launchpad is connected._
+**Your answer:** **RESOLVED — real per-track clear implemented** (`st_note5` +
+`chan_clear()` in super505).
+
+---
+
+## Status update (2026-06-21)
+
+Both decisions above are resolved: **Decision 1 is moot** (DrivenByMoss is
+uninstalled on the dev machine — no port conflict), and **Decision 2 = real
+per-track clear** (built). The core looper is working — see
+[06-build-progress-and-design.md](06-build-progress-and-design.md). The new open
+**design** question is per-channel loop length (§7 of doc 06): accept the
+`div`-subdivision model vs. pursue truly independent lengths.
 
 ---
 

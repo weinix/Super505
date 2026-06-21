@@ -3,10 +3,12 @@
 Reproduce a Boss **RC-505** loop-station workflow inside **Reaper on Linux**, driven
 by a **Novation Launchpad Pro MK3**, using the **Super8** JSFX looper as the engine.
 
-> **Status: INSPECTION + DESIGN COMPLETE — build paused.**
-> The Launchpad is not currently plugged in. All findings and the proposed
-> implementation are documented here. We resume the build once the controller
-> is connected. **No Reaper files have been created or modified yet.**
+> **Status: CORE LOOPER WORKING (build underway).**
+> The `super505` JSFX fork drives 5 loop columns from the Launchpad with LED
+> feedback, per-track clear, a count-in, and a full audio path (source → loops →
+> stereo mixdown). See **[docs/06-build-progress-and-design.md](docs/06-build-progress-and-design.md)**
+> for current state, runtime gotchas, and the open design questions (esp.
+> per-channel loop length). Docs 01–05 below capture the original inspection/design.
 
 ---
 
