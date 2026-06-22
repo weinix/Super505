@@ -33,7 +33,7 @@ the original `super8` is never touched.
 
 | Doc | Contents |
 |-----|----------|
-| [docs/01-environment-findings.md](docs/01-environment-findings.md) | System inspection: Reaper version, audio backend, MIDI ports, Launchpad device names, installed extensions, DrivenByMoss conflict |
+| [docs/01-environment-findings.md](docs/01-environment-findings.md) | System inspection: Reaper version, audio backend, MIDI ports, Launchpad device names, installed extensions, DrivenByMoss conflict, **Enya XMARI / E-SP1 USB-audio guitar** as an all-in-one input |
 | [docs/02-super8-analysis.md](docs/02-super8-analysis.md) | Full Super8 JSFX teardown: MIDI map, state machine, actions, exposed params, limitations |
 | [docs/03-architecture-proposal.md](docs/03-architecture-proposal.md) | Proposed Super505 design, signal/MIDI routing, what gets built, MVP scope |
 | [docs/04-launchpad-promk3-reference.md](docs/04-launchpad-promk3-reference.md) | Launchpad Pro MK3 Programmer-mode reference: ports, pad note grid, LED colors, sysex |
