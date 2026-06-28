@@ -52,8 +52,16 @@ reach it and **no hardware audio leaks** into the loop channels). `super505` sli
      `MIDIOUT -1`; the encoded index is backend-specific, so it's left for the GUI
      — the LEDs lighting up is the confirmation). After setting it once, **save the
      project** and the `MIDIOUT` value can be baked back into the template.
-   - DrivenByMoss must not own the port (doc 05, Decision 1) — if pads don't
-     respond, check Prefs → Control/OSC/web for a Launchpad surface and disable it.
+2. **⚠️ Remove the DrivenByMoss control surface — REQUIRED on this machine.**
+   This machine has DrivenByMoss installed (`reaper_drivenbymoss.so`; `reaper.ini`
+   had `csurf_1=DrivenByMoss4Reaper`). DBM auto-claims the Launchpad Pro MK3 as a
+   control surface and **silently consumes every pad press** before it reaches the
+   track — so super505 gets no MIDI even though the notes arrive at Reaper. This was
+   the real cause of "pads do nothing" / "pressing a pad selects the wrong track and
+   plays" (the latter was DBM's own session-mode mapping, not super505).
+   Fix: **Prefs → Control/OSC/web → select `DrivenByMoss4Reaper` → Remove** (fully
+   reversible via Add). This is doc 05 Decision 1 — *not* moot here (it was only moot
+   on the `bmini` dev machine, which had DBM uninstalled).
    - If the Launchpad gets stuck in Programmer mode after closing Reaper, reset with
      `tools/lp_programmer.sh live` (needs the port free — close Reaper first).
 2. **Vocal = Yeti?** The template points Vocal at **UR22C input 1** because Reaper's
@@ -98,9 +106,19 @@ pass (≤1 s) or a Reaper restart.
 
 ## Verification status
 
-Structurally validated (REAPER chunk braces balanced; every line form copied from
-real REAPER-authored projects on this machine; drum VSTi block is verbatim from the
-working `MT Power Drum.RTrackTemplate`; mono channel-send encoding verbatim from a
-real multichannel project). **Not yet live-loaded in the REAPER GUI** — open it once
-and confirm: 6 tracks present, drum VSTi loads, the 5 sends show on the looper bus,
-and (Launchpad connected) pads light up.
+**Looper confirmed working end-to-end on this machine** (2026-06-27): Launchpad pads
+drive super505 record/play after removing the DrivenByMoss surface; GUI controls work;
+audio path verified. Pad→note mapping verified exact with `tools/lp_map.sh` (Record
+81–85, Stop 71–75, Clear 61–65, all channel 1, MIDI port `36:0`).
+
+Debugging tools added this session:
+- `tools/lp_map.sh` — interactive pad→MIDI mapper (ALSA seq; works while Reaper runs).
+- `tools/lp_programmer.sh` — Launchpad programmer-mode / paint helper (raw ALSA; needs
+  the port free, i.e. Reaper closed).
+
+Known good signal chain (verified): pad → `36:0` → PipeWire **Midi-Bridge** →
+`REAPER:MIDI Input 4` → looper track (armed + **Monitor: Normal**) → super505. The
+indirect Launchpad→Reaper path *through* the Midi-Bridge node (visible in qjackctl) is
+normal for PipeWire — not a fault. super505 only reads MIDI while the track is
+processing, so **Monitor must be Normal** (the JSFX GUI works regardless, so a working
+GUI does not prove the input path).

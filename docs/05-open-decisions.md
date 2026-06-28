@@ -37,8 +37,14 @@ Clear on Row 3.
 ## Status update (2026-06-21)
 
 Both decisions above are resolved: **Decision 1 is moot** (DrivenByMoss is
-uninstalled on the dev machine — no port conflict), and **Decision 2 = real
-per-track clear** (built). The core looper is working — see
+uninstalled on the `bmini` dev machine — no port conflict), and **Decision 2 = real
+per-track clear** (built).
+
+> **2026-06-27 update — Decision 1 is NOT moot on the `sun` machine.** This machine
+> has DrivenByMoss installed and active (`csurf_1=DrivenByMoss4Reaper`); it claims the
+> Launchpad and silently eats every pad press, so super505 gets no MIDI. Resolution
+> taken = **(Recommended) toggle DBM off**: Prefs → Control/OSC/web → Remove
+> `DrivenByMoss4Reaper` (reversible). See `docs/07` §"Manual steps" item 2. The core looper is working — see
 [06-build-progress-and-design.md](06-build-progress-and-design.md). The new open
 **design** question is per-channel loop length (§7 of doc 06): accept the
 `div`-subdivision model vs. pursue truly independent lengths.
