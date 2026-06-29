@@ -109,7 +109,16 @@ st_rdc = 11; // msec, chX.rdc is samples
 st_div = 12; // subdiv, 1=normal, chX.div is 1/this
 st_fade_size = 13; // fadeout size
 st_note5 = 14; // Super505: per-track CLEAR note
-st_num = 15;
+st_note6 = 15; // Super505: UNDO note  (Phase 1 stub)
+st_note7 = 16; // Super505: FX note    (Phase 1 stub)
+st_note8 = 17; // Super505: SOLO note
+st_note9 = 18; // Super505: MUTE note
+st_mute  = 19; // Super505: 0/1 output mute gate (PERSIST)
+st_solo  = 20; // Super505: 0/1 solo (transient, not persisted)
+st_fx    = 21; // Super505: 0/1 FX toggle (transient stub)
+st_mult   = 22; // Super505 loop-sync: base-measures this loop spans (>=1; 0=unset) (PERSIST)
+st_anchor = 23; // Super505 loop-sync: g_cycle captured at record-start downbeat (PERSIST)
+st_num = 24;
 
 // Super505 LED palette indices (Launchpad Pro MK3 Programmer mode, velocity =
 // color). Verify/tweak with tools/lp_programmer.sh ramp; one line each.
@@ -118,8 +127,14 @@ C_RED   = 5;   // recording
 C_AMBER = 9;   // overdub
 C_GREEN = 21;  // playing
 C_DIM   = 45;  // stopped with content
-C_WHITE = 3;   // select row (static)
+C_WHITE = 3;   // select tint / status pulse peak (static)
 C_UTIL  = 1;   // utility row (static, dim)
+// Super505 v2 per-track button colors (Programmer-mode palette indices; tweak w/ ramp)
+C_YELLOW    = 13;  // SOLO active
+C_BLUE      = 67;  // MUTE active
+C_PURPLE    = 49;  // FX active
+C_PURPLE_DIM= 50;  // FX off (reserved, dim)
+C_UNDO_DIM  = 1;   // UNDO reserved (dim)
 
 function recalc_fades() (
   g_fadespeed = exp(-1/(srate * 0.002));  // fade speed for monitoring
@@ -127,6 +142,7 @@ function recalc_fades() (
   g_slope_recout = -1/(srate * 0.030); // fade length for ending rec
   g_slope_playin = 1/(srate * 0.050); // fade length for starting playback
   g_slope_playout = -1/(srate * 0.050); // fade length for ending playback
+  g_mutespeed = exp(-1/(srate * 0.005)); // Super505: ~5ms mute/solo gate ramp
 );
 
 recalc_fades();
@@ -146,12 +162,14 @@ function updatefromrec() instance(rec)
   this.div = 1 / rec[st_div];
 );
 
-function init(x, n1,n2,n3,n4,n5)
-  instance(idx rec buf monvol fpos fpos2 fpos_slope fpos2_slope dirty_top)
+function init(x, n1,n2,n3,n4,n5,n6,n7,n8,n9)
+  instance(idx rec buf monvol fpos fpos2 fpos_slope fpos2_slope dirty_top mgate meas_state meas_samples)
 (
   idx = x;
   fpos_slope = monvol = fpos = fpos2 = fpos2_slope = 0;
   dirty_top = -1;
+  mgate = 1; // Super505: output gate starts open (un-muted)
+  meas_state = meas_samples = 0; // Super505 loop-sync: not measuring a length yet
   buf = alloc(g_maxlen);
 
   rec = mem_stlist + x*st_num;
@@ -160,6 +178,15 @@ function init(x, n1,n2,n3,n4,n5)
   rec[st_note3] = n3;
   rec[st_note4] = n4;
   rec[st_note5] = n5;
+  rec[st_note6] = n6; // UNDO
+  rec[st_note7] = n7; // FX
+  rec[st_note8] = n8; // SOLO
+  rec[st_note9] = n9; // MUTE
+  rec[st_mute] = 0;
+  rec[st_solo] = 0;
+  rec[st_fx]   = 0;
+  rec[st_mult]   = 0; // loop-sync: unset (base track becomes 1 after first-rec)
+  rec[st_anchor] = 0;
   rec[st_state]=0;
   rec[st_lastd]=-1;
   rec[st_dirty]=0;
@@ -306,7 +333,7 @@ function process_rev(buf)
 );
 
 function process(s)
-  instance(fpos, fpos2, monvol, monmode, rec, peak_in, div, l_length, l_pos)
+  instance(fpos, fpos2, monvol, monmode, rec, peak_in, div, l_length, l_pos, mgate, mgate_t, meas_state, meas_samples)
   local(r,wrpos,buf,l_offs, sc)
 (
   g_prevent_processing===0 ? (
@@ -317,14 +344,19 @@ function process(s)
   );
   peak_in = max(abs(s),peak_in);
 
+  // --- Super505 loop-sync length model ---
+  // l_length stays the BASE measure (used for fades / rdc). l_pos is the per-channel
+  // buffer index: for a mult>1 loop it spans [0, mult*g_length) across base cycles,
+  // anchored so all tracks share the base downbeat. mult<=1 -> l_pos=g_pos (factory).
   l_length = g_length;
-  l_pos = g_pos;
   l_offs = g_offs;
-  div < 1 ? (
-    l_length = max((l_length*div+0.5)|0,1);
-    g_firstrec === 0 ? (
-      l_pos %= l_length;
-      l_offs %= l_length;
+  (rec[st_mult] > 1 && g_firstrec === 0 && cfgp_sync[] == 0) ? (
+    l_pos = ((g_cycle - rec[st_anchor]) % rec[st_mult]) * g_length + g_pos;
+  ) : (
+    l_pos = g_pos;
+    div < 1 ? ( // legacy subdivision (div knob deprecated; default 1 -> no-op)
+      l_length = max((g_length*div+0.5)|0,1);
+      g_firstrec === 0 ? ( l_pos %= l_length; l_offs %= l_length; );
     );
   );
   wrpos = l_pos;
@@ -344,6 +376,10 @@ function process(s)
   this.need_zero > 0 ? this.process_need_zero(l_offs+wrpos,l_offs+l_pos);
   
   r = this.rev_state!==0 ? this.process_rev(buf)*sc : sc > 0.0001 ? buf[l_pos]*sc;
+  // Super505: ramp the per-track MUTE/SOLO gate (~5ms) and apply to loop playback only
+  // (live monitor s*monvol is left ungated, matching RC-505 mute semantics).
+  mgate += (mgate_t - mgate) * (1 - g_mutespeed);
+  r *= mgate;
   monmode === 0 ? (
     // no monitoring
     fpos > 0.0001 ? (
@@ -418,7 +454,14 @@ function onmsg(m1,m2,m3) instance(rec,note,note2,note3,note4)
      this.reverse();
    ) : m2 == rec[st_note5] ? (        // Super505: per-track Clear
      this.chan_clear();
+   ) : m2 == rec[st_note8] ? (        // Super505: SOLO toggle
+     rec[st_solo] = !rec[st_solo];
+   ) : m2 == rec[st_note9] ? (        // Super505: MUTE toggle
+     rec[st_mute] = !rec[st_mute];
+   ) : m2 == rec[st_note7] ? (        // Super505: FX toggle (Phase 1 stub: LED only)
+     rec[st_fx] = !rec[st_fx];
    );
+   // note6 UNDO: Phase 1 stub — pad reserved/lit, no action yet (Phase 2 -> chan_undo()).
    newstate >= 0 ? (
      // Super505 count-in: a press on the channel that is counting cancels it
      (g_ci_active && this.idx == g_ci_chan) ? (
@@ -526,7 +569,7 @@ function reset() local(lp)
     );
     lp += st_num;
   );
-  g_firstrec=g_offs=g_length=g_pos=0;
+  g_firstrec=g_offs=g_length=g_pos=g_cycle=g_arm_mask=0;
 );
 
 
@@ -607,28 +650,37 @@ ext_noinit == 0 ? (
   g_length = 0;
   g_pos=0;
   g_firstrec=0;
+  g_cycle=0;      // Super505 loop-sync: current base-measure index (++ on g_pos wrap)
+  g_arm_mask=0;   // Super505 loop-sync: channels armed, waiting for next downbeat to start REC
   g_recstart_gate=0;
   g_prevent_processing = 0; // &1=gate, &2=sync mode
   g_chan_selected = -1; // currently selected channel
   g_lastmsg = -1;
 
   // --- Super505 additions ---
-  mem_led_last = alloc(8);
-  memset(mem_led_last, -1, 8); // last LED code sent per track (-1 forces first send)
+  mem_led_last = alloc(64); // v2: 8 tracks x 8 cols (last LED code per dynamic pad)
+  memset(mem_led_last, -1, 64); // -1 forces first send
 
   mem_sysex_prog = alloc(9);   // "enter Programmer mode" sysex
   mem_sysex_prog[0]=0xF0; mem_sysex_prog[1]=0x00; mem_sysex_prog[2]=0x20;
   mem_sysex_prog[3]=0x29; mem_sysex_prog[4]=0x02; mem_sysex_prog[5]=0x0E;
   mem_sysex_prog[6]=0x0E; mem_sysex_prog[7]=0x01; mem_sysex_prog[8]=0xF7;
 
-  // Super505 Launchpad Pro MK3 pad map (Programmer mode, channel 1; col=track):
-  //   note1 Rec/OD/Play = 81..85   note2 Stop    = 71..75
-  //   note3 Select      = 31..35   note4 Reverse = 41..45
-  //   note5 Clear       = 61..65   Channels 6..8 unused (128=off).
+  // Super505 v2 Launchpad Pro MK3 pad map (Programmer mode, channel 1): ROWS = tracks.
+  // Track i uses grid row r = 8-i (rows 8,7,6,5,4 for tracks 1..5); note = r*10+col.
+  //   col1 REC=r1  col2 STOP=r2  col3 CLEAR=r3  col4 UNDO=r4
+  //   col5 FX=r5   col6 SOLO=r6  col7 MUTE=r7   col8 STATUS+SELECT=r8
+  //   REVERSE drops off the grid (note4=128, still reachable in the GUI tweakers).
+  //   init args order: (idx, rec,stop,select,reverse,clear, undo,fx,solo,mute)
   <? loop(x=0; nch,
-      x < 5 ?
-        printf("ch%d.init(%d, %d,%d,%d,%d,%d);\n", x+1, x, 81+x, 71+x, 31+x, 41+x, 61+x) :
-        printf("ch%d.init(%d, 128,128,128,128,128);\n", x+1, x);
+      x < 5 ? (
+        r = 8 - x;
+        printf("ch%d.init(%d, %d,%d,%d,128,%d, %d,%d,%d,%d);\n",
+          x+1, x,
+          r*10+1, r*10+2, r*10+8, r*10+3,   /* rec, stop, select(col8), clear(col3) */
+          r*10+4, r*10+5, r*10+6, r*10+7);  /* undo, fx, solo, mute */
+      ) :
+        printf("ch%d.init(%d, 128,128,128,128,128,128,128,128,128);\n", x+1, x);
       x+=1;
      )
    ?>
@@ -704,8 +756,53 @@ function doconf() local(i,s) (
     x+=1;
   );
 
+  // Super505 v2: persist CLEAR + new pad notes and the MUTE gate. st_note5=14 ..
+  // st_note9=18, st_mute=19 are contiguous, so one loop covers all six. SOLO/FX
+  // and undo state are intentionally NOT persisted (transient). file_avail guards
+  // keep old projects (which lack these) loading cleanly.
+  loop(x=0;6,
+    file_avail(0) != 0 ? (
+      i = mem_stlist;
+      loop(g_nchan,
+        file_var(0,i[st_note5+x]);
+        i+=st_num;
+      );
+    );
+    x+=1;
+  );
+
+  // Super505 loop-sync: persist st_mult + st_anchor (contiguous: 22,23). Old
+  // projects lack these -> file_avail guard skips them, keeping back-compat.
+  loop(x=0;2,
+    file_avail(0) != 0 ? (
+      i = mem_stlist;
+      loop(g_nchan,
+        file_var(0,i[st_mult+x]);
+        i+=st_num;
+      );
+    );
+    x+=1;
+  );
+
   file_avail(0)>=0 ? ( // is reading config
+    // Super505 v2: re-assert the ROWS=tracks pad layout, overriding any stale
+    // note assignments restored from an older (column-layout) project. st_mute
+    // is left as read (mute state persists); only the note map is forced.
+    <? loop(x=0; nch,
+        x < 5 ? (
+          r = 8 - x;
+          printf("i=mem_stlist+%d*st_num; i[st_note1]=%d;i[st_note2]=%d;i[st_note3]=%d;i[st_note4]=128;i[st_note5]=%d;i[st_note6]=%d;i[st_note7]=%d;i[st_note8]=%d;i[st_note9]=%d;\n",
+            x, r*10+1,r*10+2,r*10+8,r*10+3,r*10+4,r*10+5,r*10+6,r*10+7);
+        ) :
+          printf("i=mem_stlist+%d*st_num; i[st_note1]=128;i[st_note2]=128;i[st_note3]=128;i[st_note4]=128;i[st_note5]=128;i[st_note6]=128;i[st_note7]=128;i[st_note8]=128;i[st_note9]=128;\n", x);
+        x+=1;
+       )
+     ?>
     updatechfromrec();
+    // loop-sync: phase re-locks at load (audio buffers aren't persisted), so reset
+    // the master cycle and clear per-channel anchors -> st_mult still defines length.
+    g_cycle = 0;
+    i = mem_stlist; loop(g_nchan, i[st_anchor]=0; i+=st_num;);
     g_slider_sync = cfgp_sync[];
     g_latchmode = cfgp_latch[];
     g_slider_click_cnt = cfgp_clickcnt[]|0;
@@ -740,10 +837,12 @@ g_syncmode==0 || (!(play_state&1) && g_syncmode != 2) ? (
   g_active_mask==0 ? (
     <? loop(i=0;nch, printf("%s ch%d.fpos2 > 0.0001\n",i?"||":"",i+1); i+=1; );
        printf("? g_inactive_blockcnt=0;\n"); ?>
-    g_inactive_blockcnt < 2 ? ( 
-      g_inactive_blockcnt+=1; 
+    g_inactive_blockcnt < 2 ? (
+      g_inactive_blockcnt+=1;
     ) : (
-      g_pos = 0
+      g_pos = 0;
+      g_cycle = 0; g_arm_mask = 0; // loop-sync: master idle reset
+      s505_j = mem_stlist; loop(g_nchan, s505_j[st_anchor]=0; s505_j += st_num;);
     );
   ) : g_inactive_blockcnt=0;
 );
@@ -763,11 +862,14 @@ g_inject_midinote >= 1024 ? (
 );
 
 function onblock()
-  instance(rec peak_in monmode_sel monmode idx)
-  global(g_peak_decay st_peak_in srate last_w g_length)
+  instance(rec peak_in monmode_sel monmode idx mgate_t)
+  global(g_peak_decay st_peak_in srate last_w g_length g_any_solo g_solo_mask st_mute)
 (
   rec[st_peak_in] = peak_in;
   peak_in *= g_peak_decay;
+  // Super505: per-track output-gate target. Any solo active -> only soloed tracks
+  // sound (mute ignored for them); otherwise mute gates this track.
+  mgate_t = g_any_solo ? ((g_solo_mask & (1<<idx)) ? 1 : 0) : (rec[st_mute] ? 0 : 1);
   monmode_sel = monmode >= 2 || is_chan_selected(idx);
   this.rev_state == 0 || !g_length ? (
     this.rev_requested && atomic_exch(this.rev_state=0,this.rev_requested) ? (
@@ -778,6 +880,14 @@ function onblock()
   this.rev_state !== 0 ? last_w=-1; // force redraw if reversing this block
 );
 
+// Super505: compute the solo mask once per block, before the per-channel onblock().
+g_solo_mask = 0;
+s505_i = 0;
+loop(g_nchan,
+  mem_stlist[s505_i*st_num + st_solo] ? (g_solo_mask |= (1<<s505_i));
+  s505_i += 1;
+);
+g_any_solo = g_solo_mask != 0;
 <? loop(x=0;nch, printf("ch%d.onblock();\n",x+=1)) ?>
 
 (g_click_int = (cfgp_clickcnt[]|0)) > 0 ?( 
@@ -788,58 +898,97 @@ function onblock()
 
 i_srate = 1.0/srate;
 
-// ======================= Super505 LED feedback =============================
-// Self-healing: enter Programmer mode once, then (re)assert the static pads
-// every ~0.5s so a dropped paint or a mode switch automatically recovers
-// (no dependence on exact startup timing). All 64 pads update from one FX.
+// ============== Super505 LED feedback (v2: ROWS = tracks) ==================
+// Track i -> grid row (8-i); 8 columns per row:
+//   col1 REC/PLAY/OD  col2 STOP  col3 CLEAR  col4 UNDO(stub)
+//   col5 FX(stub)     col6 SOLO  col7 MUTE   col8 STATUS+SELECT
+// Self-healing: enter Programmer mode once, then every ~0.5s repaint the static
+// columns + blank the unused rows 1-3, and force the dynamic pads to re-send.
 g_s505_phase == 0 ? (
   midisend_buf(0, mem_sysex_prog, 9);        // enter Programmer mode
   g_s505_phase = 1;
   g_s505_t = 0;
 ) : (
   g_s505_t += samplesblock;
-  g_s505_t >= srate*0.5 ? (                   // (re)paint static rows periodically
+  g_s505_t >= srate*0.5 ? (
     g_s505_t = 0;
     s505_i = 0;
     loop(min(g_nchan,5),
-      midisend(0, 0x90, 71+s505_i, C_GREEN);  // Stop row
-      midisend(0, 0x90, 61+s505_i, C_AMBER);  // Clear row
-      midisend(0, 0x90, 41+s505_i, C_DIM);    // Reverse row
-      midisend(0, 0x90, 31+s505_i, C_WHITE);  // Select row
+      s505_base = (8 - s505_i) * 10;             // track i -> grid row 8-i
+      midisend(0, 0x90, s505_base+2, C_GREEN);   // col2 STOP  (static)
+      midisend(0, 0x90, s505_base+3, C_AMBER);   // col3 CLEAR (static)
+      midisend(0, 0x90, s505_base+4, C_UNDO_DIM);// col4 UNDO  (reserved/dim)
       s505_i += 1;
     );
-    s505_i = 11;
-    loop(8, midisend(0, 0x90, s505_i, C_UTIL); s505_i += 1; ); // Utility row 11..18
-    memset(mem_led_last, -1, 8);              // force Rec/Play LEDs to re-send
+    s505_i = 11;                                  // blank unused rows 1,2,3
+    loop(8,
+      midisend(0, 0x90, s505_i,    C_OFF);
+      midisend(0, 0x90, s505_i+10, C_OFF);
+      midisend(0, 0x90, s505_i+20, C_OFF);
+      s505_i += 1;
+    );
+    memset(mem_led_last, -1, 64);                 // force dynamic pads to re-send
   );
 );
 
-// Rec/Play pads (81..85) reflect loop state every block (send-on-change).
+// Per-track dynamic pads, every block (send-on-change; idx = track*8 + col-1).
 g_s505_phase >= 1 ? (
   s505_i = 0;
   loop(min(g_nchan,5),
-    s505_rec = mem_stlist + s505_i*st_num;
-    s505_st  = s505_rec[st_state];
-    (g_ci_active && s505_i == g_ci_chan) ? (          // counting in -> amber flash
-      s505_col = C_AMBER; s505_ch = 1;
-    ) : s505_st == 2 ? (                              // recording / overdub
-      (g_firstrec == 1 + s505_i) ? (
-        s505_col = C_RED; s505_ch = 1;                // first pass: defining loop -> red flash (ch2)
-      ) : (
-        s505_col = C_AMBER; s505_ch = 0;              // overdubbing onto existing loop -> amber
-      );
-    ) : s505_st == 1 ? (
-      s505_col = C_GREEN; s505_ch = 0;                // playing
-    ) : s505_rec[st_dirty] > 0 ? (
-      s505_col = C_DIM; s505_ch = 0;                  // stopped, has content
-    ) : (
-      s505_col = C_OFF; s505_ch = 0;                  // empty
-    );
+    s505_rec  = mem_stlist + s505_i*st_num;
+    s505_base = (8 - s505_i) * 10;
+    s505_st   = s505_rec[st_state];
+    s505_sel  = is_chan_selected(s505_i);
+
+    // col1 REC/PLAY/OD (state color; ch2 = flashing)
+    (g_ci_active && s505_i == g_ci_chan) ? (
+      s505_col = C_AMBER; s505_ch = 1;                 // counting in -> amber flash
+    ) : s505_st == 2 ? (
+      (g_firstrec == 1 + s505_i) ? ( s505_col = C_RED; s505_ch = 1; )    // first pass -> red flash
+                                  : ( s505_col = C_AMBER; s505_ch = 0; ); // overdub -> amber
+    ) : s505_st == 1 ? ( s505_col = C_GREEN; s505_ch = 0; )              // playing
+      : s505_rec[st_dirty] > 0 ? ( s505_col = C_DIM; s505_ch = 0; )      // stopped w/ content
+      : ( s505_col = C_OFF; s505_ch = 0; );                             // empty
     s505_code = s505_col*2 + s505_ch;
-    mem_led_last[s505_i] != s505_code ? (
-      mem_led_last[s505_i] = s505_code;
-      midisend(0, 0x90 + s505_ch, 81+s505_i, s505_col); // ch1 static / ch2 flashing
+    s505_idx = s505_i*8 + 0;
+    mem_led_last[s505_idx] != s505_code ? (
+      mem_led_last[s505_idx] = s505_code;
+      midisend(0, 0x90 + s505_ch, s505_base+1, s505_col);
     );
+
+    // col5 FX (Phase 1 stub: purple on/off)
+    s505_col = s505_rec[st_fx] ? C_PURPLE : C_PURPLE_DIM;
+    s505_idx = s505_i*8 + 4;
+    mem_led_last[s505_idx] != s505_col ? ( mem_led_last[s505_idx]=s505_col; midisend(0,0x90,s505_base+5,s505_col); );
+
+    // col6 SOLO
+    s505_col = s505_rec[st_solo] ? C_YELLOW : C_OFF;
+    s505_idx = s505_i*8 + 5;
+    mem_led_last[s505_idx] != s505_col ? ( mem_led_last[s505_idx]=s505_col; midisend(0,0x90,s505_base+6,s505_col); );
+
+    // col7 MUTE
+    s505_col = s505_rec[st_mute] ? C_BLUE : C_OFF;
+    s505_idx = s505_i*8 + 6;
+    mem_led_last[s505_idx] != s505_col ? ( mem_led_last[s505_idx]=s505_col; midisend(0,0x90,s505_base+7,s505_col); );
+
+    // col8 STATUS + SELECT (loop-position pulse; white if this track is selected)
+    s505_rec[st_dirty] > 0 ? (
+      (s505_st == 1 || s505_st == 2) ? (
+        s505_locallen = max((g_length / max(s505_rec[st_div],1))|0, 1);
+        (g_pos % s505_locallen) < (((s505_locallen/8)|0) + 1) ? (
+          s505_col = s505_sel ? C_WHITE : C_GREEN;
+        ) : (
+          s505_col = C_DIM;
+        );
+      ) : (
+        s505_col = s505_sel ? C_WHITE : C_DIM;        // stopped w/ content
+      );
+    ) : (
+      s505_col = s505_sel ? C_UTIL : C_OFF;           // empty
+    );
+    s505_idx = s505_i*8 + 7;
+    mem_led_last[s505_idx] != s505_col ? ( mem_led_last[s505_idx]=s505_col; midisend(0,0x90,s505_base+8,s505_col); );
+
     s505_i += 1;
   );
 );
@@ -943,7 +1092,7 @@ g_chan_selected >= 0 ? (
   );
 );
 
-g_pos >= g_length && g_firstrec == 0 ? g_pos = 0;
+g_pos >= g_length && g_firstrec == 0 ? ( g_pos = 0; g_cycle += 1; ); // loop-sync: advance base measure
 
 <? loop(x=0;nch, printf("spl%d=ch%d.process(spl%d);\n",x,x+1,x);x+=1) ?>
 
@@ -984,7 +1133,7 @@ g_prevent_processing===0 ? (
               mem_stlist[(g_firstrec-1)*st_num + st_div] : 1);
      );
   ) : (
-    (g_pos += 1) >= g_length ? g_pos=0;
+    (g_pos += 1) >= g_length ? ( g_pos=0; g_cycle += 1; ); // loop-sync: advance base measure
   );
 );
 
