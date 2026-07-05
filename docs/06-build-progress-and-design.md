@@ -187,10 +187,15 @@ monitored tracks — unarmed source tracks made looper rows record silence. The 
 now publishes a per-channel "wants live input" bitmask (armed / recording /
 count-in) to gmem namespace `Super505` (`[0]` heartbeat, `[1]` mask, `[2]` nchan);
 `reaper/scripts/super505_arm_bridge.lua` (auto-started by `Scripts/__startup.lua`)
-watches it and record-arms whichever tracks *send into* that looper channel — the
-mapping follows the project routing, not track order. One-way: the bridge never
-disarms (disarming would cut live monitoring through the looper). If a flagged
-channel has no feeding send, it prints a console warning naming the missing send.
+watches it and, on every mask change, **reconciles** all looper-feeding tracks:
+a track feeding a channel that wants input is record-armed (+monitoring); a track
+feeding only idle/playing channels is **disarmed** (two-way mirror — the REAPER
+track is armed exactly while its looper row records). The mapping follows the
+receives on the looper track, not track order; tracks that don't send into the
+looper are never touched. If a flagged channel has no feeding send, it prints a
+console warning naming the missing send. Trade-offs: idle rows lose live input
+monitoring *through the looper*, and an overdub press re-arms one defer tick
+(~30 ms) after recording starts.
 
 ---
 

@@ -142,10 +142,13 @@ Pressing rec on looper rows 1-5 auto record-arms the REAPER track(s) feeding tha
 looper channel (fixes "rows 3-5 record silence because source tracks weren't armed").
 - [x] JSFX publishes to gmem namespace `Super505`: [0]=heartbeat, [1]=want-input
       bitmask (armed / recording / count-in channels), [2]=nchan.
-- [x] `reaper/scripts/super505_arm_bridge.lua`: defer loop, on a rising mask bit
-      finds the track(s) whose receive on the looper covers that channel (mapping
-      follows the SENDS, not track order) and sets I_RECARM + I_RECMON. One-way:
-      never auto-disarms. Warns in the console if a channel has no feeding send.
+- [x] `reaper/scripts/super505_arm_bridge.lua`: defer loop; on every mask change it
+      RECONCILES all looper-feeding tracks (mapping follows the SENDS, not track
+      order): feeds a wanted channel -> I_RECARM=1 (+I_RECMON), feeds only
+      idle/playing channels -> DISARMED (two-way mirror, user request 2026-07-05).
+      Non-looper tracks never touched. Warns in the console if a wanted channel
+      has no feeding send. Trade-off: idle rows lose live input monitoring through
+      the looper; overdub re-arms ~1 defer tick (~30 ms) after the press.
 - [x] `reaper/scripts/__startup.lua` auto-starts the bridge at REAPER launch.
 - [x] Deployed: JSFX + both scripts to `~/.config/REAPER` (Scripts/, Effects/).
 - [x] Model tests for the gmem mask protocol (20 passing total).
