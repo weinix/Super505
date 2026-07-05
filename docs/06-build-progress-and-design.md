@@ -133,37 +133,54 @@ Decisions already made by the user:
 
 ---
 
-## 7. The loop-length design question (the big one for next session)
+## 7. Independent track lengths — IMPLEMENTED (v1, 2026-07-05)
 
 User wants: **drum = 1 bar, chords = 8 bars, solo on top** — i.e. each part loops at
-its own length.
+its own length. This is now a core v1 feature (RC-505 style), built additively on
+the factory engine rather than the invasive rewrite feared earlier.
 
-**Engine reality:** Super505 has **one shared master length** (`g_length`); it does
-**not** support free, arbitrary per-channel lengths. What it offers:
-- Per-channel **`div`** (1–64): a channel loops at `master ÷ div` (a *subdivision*).
-- Global halve/double.
+**Model.** The first *synced* recording defines the **base measure** (`g_length`
+= 1 bar); a master `g_cycle` counts bars. Each track owns (state record):
 
-**This covers the user's case** because 8 bars ÷ 8 = 1 bar:
-- Set master grid = 8 bars: top bar `sync: project`, `length` = 8 measures, project
-  tempo set. (Sync mode fixes the length by tempo, **independent of record order** —
-  so the short drum loop can be recorded first.)
-- Drum channel: **`div = 8`** → 1-bar loop (records 1 bar, repeats 8×).
-- Chord channel: `div = 1` → full 8-bar loop. Solo: `div = 1` or shorter, or live.
+| field | meaning |
+|---|---|
+| `st_len` | loop length in **samples** (authoritative for FREE tracks) |
+| `st_mult` | loop length in **bars** (multiple of the base; 0 = free/unset) |
+| `st_ppos` | current playback position inside its own loop (drives its LED) |
+| `st_rectempo` | project tempo captured at record start |
+| `st_sync` | `FREE` / `MEASURE_SYNC` (default) / `MASTER_SYNC` |
+| `st_qmode` | quantize start/stop/rec-close: off / beat / bar (default bar) |
+| `st_fixlen` | preset bar count — recording auto-closes at exactly N bars |
+| `st_anchor` | `g_cycle` at record start (phase anchor for the loop window) |
 
-**Limitation / open decision:** lengths must be **subdivisions of the master**, and
-the master must be the **longest** loop. Truly **independent, non-divisor** lengths
-(e.g. a free 3-bar vs 5-bar loop, each set by its own button, RC-505 multitrack
-style) are **not** this engine. Options if the user wants that:
-- (a) Accept the `div` + sync subdivision model (no code change; fits normal song
-  structure). ← recommended default
-- (b) Run **separate Super505 instances** per independent part (each has its own
-  `g_length`) — needs distinct Launchpad pad/LED mapping per instance.
-- (c) A **clip-based** approach (Reaper media items / a clip looper) for fully free
-  lengths.
-- (d) Re-architect super505 for per-channel length (per-channel `g_length`/`g_pos`/
-  `g_firstrec` …) — large, invasive, risky; not recommended.
+- **MEASURE_SYNC** (default): rec press on a later track *arms* it (red flash);
+  recording starts at the next base downbeat, closes snapped to a whole multiple
+  of the base, playback phase-locked via `(g_cycle - anchor) % mult`.
+  1-bar drums + 8-bar guitar stay bar-aligned and re-meet every 8 bars.
+- **MASTER_SYNC**: same, but the loop window locks to the *global* bar-1 grid
+  (`anchor = 0`).
+- **FREE**: records immediately, keeps its exact sample length, runs its own
+  position counter — never touches the grid.
+- AllStart/AllStop preserve every track's own length; on AllStart all synced
+  tracks restart aligned at bar 1.
+- The base track can pre-set its length (e.g. 1 bar) via `st_fixlen`, closing at
+  N bars of the tempo captured at record start.
 
-**→ This is the main design discussion for next session.**
+**Actions** (dispatcher; Launchpad **row 2** pads 21–28, or the "Action trigger"
+slider for MIDI-learn/automation): `SetCurrentTrackLength{1,2,4,8}Bars`,
+`SetCurrentTrackSyncMode{Free,Measure,Master}`, `ToggleCurrentTrackSyncMode`.
+They act on the *selected* track (col-8 select pad). Row-2 LEDs show the selected
+track's bar count (green) and sync mode (amber).
+
+**Tests**: `tests/test_track_lengths.py` runs the spec scenario (120 BPM: 1-bar
+track loops 8× while the 8-bar track loops once; re-alignment; AllStop/AllStart
+length preservation) against `tests/s505_model.py`, a sample-accurate Python
+mirror of the engine arithmetic. Keep model and JSFX in sync when editing the
+engine.
+
+**Known limits (v1)**: global halve/double still operate on the base measure only
+(mult tracks don't rescale); FREE→MEASURE with existing content applies to the
+next recording; beat-quantized tracks use the free-position engine internally.
 
 ---
 

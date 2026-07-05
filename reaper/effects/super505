@@ -8,6 +8,15 @@ desc:Super505 RC-505-style looper for Launchpad Pro MK3 (Super8 fork)
 //   - LED feedback: Rec/Play pad reflects loop state (red/amber/green/dim/flash).
 //   - Programmer-mode sysex + static utility pads painted on first @block.
 //   - Pass-through MIDI echo dropped (so only LED data leaves the track output).
+//   - v1 INDEPENDENT TRACK LENGTHS (RC-505 style): each track owns its loop
+//     length (samples + bars), playback position, record tempo, sync mode
+//     (FREE / MEASURE_SYNC / MASTER_SYNC, default MEASURE_SYNC) and quantize
+//     mode (off / beat / bar, default bar). The first synced recording defines
+//     the base measure (1 bar); later synced tracks arm at a downbeat and snap
+//     to a whole multiple of it (1-bar drums + 8-bar guitar stay bar-aligned).
+//     FREE tracks run their own position/length off-grid. Action dispatcher
+//     (Launchpad row 2 / "Action trigger" slider): SetCurrentTrackLength
+//     1/2/4/8 bars, sync mode Free/Measure/Master/Toggle.
 // Original super8 is never modified.
 // ===========================================================================
 
@@ -79,6 +88,7 @@ options: maxmem=<? printf("%d",maxmem*1024*128); ?> no_meter gfx_idle prealloc=*
 slider1:g_slider_sync=0<0,2,1{off,project,playback}>-Sync
 slider4:g_slider_click_cnt=0<0,64,1>-Click count/length
 slider5:g_countin=0<0,8,1>-Count-in beats (at project tempo)
+slider6:g_slider_action=0<0,8,1{-,SetCurrentTrackLength1Bar,SetCurrentTrackLength2Bars,SetCurrentTrackLength4Bars,SetCurrentTrackLength8Bars,SetCurrentTrackSyncModeFree,SetCurrentTrackSyncModeMeasure,SetCurrentTrackSyncModeMaster,ToggleCurrentTrackSyncMode}>-Action trigger (fires on change, self-resets)
 
 @init
 
@@ -116,9 +126,24 @@ st_note9 = 18; // Super505: MUTE note
 st_mute  = 19; // Super505: 0/1 output mute gate (PERSIST)
 st_solo  = 20; // Super505: 0/1 solo (transient, not persisted)
 st_fx    = 21; // Super505: 0/1 FX toggle (transient stub)
-st_mult   = 22; // Super505 loop-sync: base-measures this loop spans (>=1; 0=unset) (PERSIST)
+st_mult   = 22; // Super505 loop-sync: base-measures this loop spans (>=1; 0=free/unset) (PERSIST)
 st_anchor = 23; // Super505 loop-sync: g_cycle captured at record-start downbeat (PERSIST)
-st_num = 24;
+// Super505 v1 independent-track-length state:
+st_sync    = 24; // sync mode: 0=FREE 1=MEASURE_SYNC(default) 2=MASTER_SYNC (PERSIST)
+st_qmode   = 25; // quantize: 0=off 1=beat 2=bar(default) for start/stop/rec-close (PERSIST)
+st_fixlen  = 26; // preset loop length in bars (0=measure freely); auto-closes rec (PERSIST)
+st_len     = 27; // loop length in SAMPLES (authoritative for FREE tracks; mult*g_length for synced)
+st_ppos    = 28; // current playback position in samples, within this track's own loop (UI/LED)
+st_rectempo= 29; // project tempo captured at record start (bar math for the base track)
+st_num = 30;
+
+// Track loop length in samples: synced tracks derive from the base measure so
+// halve/double of the base keeps them proportional; FREE tracks own st_len.
+function track_len(rec) (
+  rec[st_mult] > 0 ? rec[st_mult]*g_length :
+  rec[st_len]  > 0 ? rec[st_len] :
+  g_length > 0 ? max(floor(g_length/rec[st_div]+0.5),1) : 0;
+);
 
 // Super505 LED palette indices (Launchpad Pro MK3 Programmer mode, velocity =
 // color). Verify/tweak with tools/lp_programmer.sh ramp; one line each.
@@ -187,6 +212,12 @@ function init(x, n1,n2,n3,n4,n5,n6,n7,n8,n9)
   rec[st_fx]   = 0;
   rec[st_mult]   = 0; // loop-sync: unset (base track becomes 1 after first-rec)
   rec[st_anchor] = 0;
+  rec[st_sync]   = 1; // default MEASURE_SYNC
+  rec[st_qmode]  = 2; // default quantize-to-bar
+  rec[st_fixlen] = 0;
+  rec[st_len]    = 0;
+  rec[st_ppos]   = 0;
+  rec[st_rectempo] = 0;
   rec[st_state]=0;
   rec[st_lastd]=-1;
   rec[st_dirty]=0;
@@ -222,38 +253,102 @@ function process_need_zero(p1, p2) global()
   nz_2 >= need_zero && nz_1 >= nz_1e && nz_0>=nz_0e ? need_zero=0;
 );
 
-function setstate(st) instance(fpos_slope, fpos2_slope, rec) local(dt)
+function setstate(st) instance(fpos_slope, fpos2_slope, rec) local(dt l)
 (
+  // Super505 loop-sync: finalize loop length when leaving the record state.
+  st != 2 ? (
+    this.meas_state == 1 ? (
+      // subsequent synced track: snap the measured length to a whole multiple of
+      // the base (or exactly the preset bar count, if one was set)
+      rec[st_mult] = rec[st_fixlen] > 0 ? max(rec[st_fixlen]|0,1)
+                   : max( floor( this.meas_samples / max(g_length,1) + 0.5 ), 1 );
+      // if we rounded UP past what was recorded, zero the un-recorded tail so the
+      // loop doesn't play stale buffer data.
+      this.meas_samples < rec[st_mult]*g_length ? (
+        memset(rec[st_buf] + this.meas_samples, 0, rec[st_mult]*g_length - this.meas_samples);
+      );
+      // MASTER_SYNC: loop window locks to the global bar-1 grid (cycle 0);
+      // MEASURE_SYNC: window anchored at this track's own record-start downbeat.
+      rec[st_anchor] = rec[st_sync] == 2 ? 0 : rec[st_anchor] % max(rec[st_mult],1);
+      rec[st_len] = rec[st_mult]*g_length;
+      this.meas_state = 0;
+      this.dirty_top = max(this.dirty_top, rec[st_mult]*g_length - 1);
+    ) : this.meas_state == 2 ? (
+      // FREE / unquantized close: keep the exact measured length. Beat quantize
+      // (qmode 1) rounds to whole beats of the base grid when one exists.
+      l = this.meas_samples;
+      rec[st_qmode] == 1 && g_beatlen > 0 ? l = max(floor(l/g_beatlen + 0.5),1) * g_beatlen;
+      l = max(min(l, g_maxlen-1),1);
+      l > this.meas_samples ? memset(rec[st_buf] + this.meas_samples, 0, l - this.meas_samples);
+      rec[st_len] = l;
+      rec[st_mult] = 0;
+      rec[st_anchor] = 0;
+      this.fppos = 0;    // seamless: the sample after the last recorded one is loop start
+      this.meas_state = 0;
+      this.dirty_top = max(this.dirty_top, l - 1);
+    ) : g_firstrec == 1 + this.idx ? (
+      // base/first track defines the grid -> length multiple = 1, anchor 0
+      rec[st_mult] = 1;
+      rec[st_anchor] = 0;
+      rec[st_len] = g_length;
+    );
+  );
   rec[st_state] ? (
-    st==0 ? ( 
+    st==0 ? (
       g_active_mask &= -(1<<this.idx + 1);
     ) : g_length > 0 ? (
-      g_firstrec = 0;   
+      // base track length just closed (2nd rec press -> keep overdubbing, or stop->play)
+      g_firstrec == 1 + this.idx ? (
+        rec[st_mult] = 1;
+        rec[st_anchor] = 0;
+        rec[st_len] = g_length;
+      );
+      g_firstrec = 0;
       g_prevent_processing &= 0xe;
       this.extra_recording = (g_pos == 0 || g_pos == g_length) ? (0|min(srate*.5, g_maxlen-g_length)) : 0;
     );
   ) : (
-    st>0 ? ( 
+    st>0 ? (
+      // restarting a FREE-position loop from stop: RC-505 restarts from the top
+      rec[st_mult] == 0 && rec[st_len] > 0 ? this.fppos = 0;
+
       st == 2 && (dt = max(rec[st_dirty], this.dirty_top+1)) > 0 ? (
         this.set_need_zero(dt);
         this.dirty_top=-1;
         rec[st_dirty]=0;
       );
-      
-      (g_active_mask |= (1<<this.idx)) == (1<<this.idx) ? (
-        st == 2 ? ( 
-          cfgp_gate[] > g_infthreshdb && cfgp_sync[] == 0 ? (
-            g_recstart_gate = 10^(cfgp_gate[]/20);
-            g_prevent_processing |= 1;
-          ) : (
-            g_prevent_processing &= 0xe;
-          );
 
-          cfgp_sync[] == 0 ? (
-            g_pos = g_offs = g_length = 0; 
+      (g_active_mask |= (1<<this.idx)) == (1<<this.idx) && st == 2 ? (
+        cfgp_gate[] > g_infthreshdb && cfgp_sync[] == 0 ? (
+          g_recstart_gate = 10^(cfgp_gate[]/20);
+          g_prevent_processing |= 1;
+        ) : (
+          g_prevent_processing &= 0xe;
+        );
+      );
+
+      st == 2 && cfgp_sync[] == 0 && this.meas_state == 0 ? (
+        rec[st_sync] != 0 ? (
+          g_length == 0 && g_firstrec == 0 ? (
+            // no grid yet: this recording defines the base measure (even if a
+            // FREE track is already playing -- FREE tracks never own the grid)
+            g_pos = g_offs = 0;
+            g_cycle = 0;
             g_firstrec = 1+this.idx;
+            rec[st_rectempo] = tempo;
+          ) : g_length > 0 && g_active_mask == (1<<this.idx) ? (
+            // grid exists but everything was stopped: record from the idle bar top
+            this.meas_state = 1;
+            this.meas_samples = 0;
+            rec[st_anchor] = g_cycle;
+            rec[st_rectempo] = tempo;
           );
-        );        
+        ) : rec[st_len] <= 0 ? (
+          // FREE track, first recording: measure its own length off-grid
+          this.meas_state = 2;
+          this.meas_samples = 0;
+          rec[st_rectempo] = tempo;
+        );
       );
     );
   );
@@ -333,7 +428,7 @@ function process_rev(buf)
 );
 
 function process(s)
-  instance(fpos, fpos2, monvol, monmode, rec, peak_in, div, l_length, l_pos, mgate, mgate_t, meas_state, meas_samples)
+  instance(fpos, fpos2, monvol, monmode, rec, peak_in, div, l_length, l_pos, mgate, mgate_t, meas_state, meas_samples, fppos)
   local(r,wrpos,buf,l_offs, sc)
 (
   g_prevent_processing===0 ? (
@@ -344,24 +439,57 @@ function process(s)
   );
   peak_in = max(abs(s),peak_in);
 
-  // --- Super505 loop-sync length model ---
-  // l_length stays the BASE measure (used for fades / rdc). l_pos is the per-channel
-  // buffer index: for a mult>1 loop it spans [0, mult*g_length) across base cycles,
-  // anchored so all tracks share the base downbeat. mult<=1 -> l_pos=g_pos (factory).
+  // --- Super505 independent-track-length model ---
+  // l_length is this track's own loop length (base measure for synced tracks
+  // while recording; mult*g_length or st_len when set). l_pos is the per-channel
+  // buffer index: synced mult>1 loops span [0, mult*g_length) across base cycles,
+  // anchored so all tracks share the base downbeat; FREE loops run their own
+  // position counter (fppos). mult<=1 and no free length -> l_pos=g_pos (factory).
   l_length = g_length;
   l_offs = g_offs;
-  (rec[st_mult] > 1 && g_firstrec === 0 && cfgp_sync[] == 0) ? (
-    l_pos = ((g_cycle - rec[st_anchor]) % rec[st_mult]) * g_length + g_pos;
+  meas_state == 1 ? (
+    // MEASURING a subsequent synced track: write MONOTONICALLY across base
+    // measures (buffer index grows past one base measure), bounded by g_maxlen.
+    // The recorded sample count is tallied so we can snap to a whole multiple
+    // (or close exactly at the preset bar count) on stop.
+    wrpos = (g_cycle - rec[st_anchor]) * g_length + g_pos;
+    wrpos >= g_maxlen ? wrpos = g_maxlen - 1;
+    l_pos = wrpos;
+    meas_samples += 1;
+    rec[st_fixlen] > 0 && g_length > 0 && meas_samples >= rec[st_fixlen]*g_length ? this.setstate(1);
+  ) : meas_state == 2 ? (
+    // MEASURING a FREE(-quantize) track: write monotonically from buffer top;
+    // the exact sample count becomes the loop length on close.
+    wrpos = meas_samples;
+    wrpos >= g_maxlen ? wrpos = g_maxlen - 1;
+    l_pos = wrpos;
+    l_length = max(meas_samples,1);
+    l_offs = 0;
+    meas_samples += 1;
+  ) : rec[st_mult] == 0 && rec[st_len] > 0 ? (
+    // FREE loop playback/overdub: track-owned position, own length
+    l_length = rec[st_len];
+    l_pos = fppos;
+    (fppos += 1) >= rec[st_len] ? fppos = 0;
+    l_offs = 0;
+    wrpos = l_pos;
   ) : (
-    l_pos = g_pos;
-    div < 1 ? ( // legacy subdivision (div knob deprecated; default 1 -> no-op)
-      l_length = max((g_length*div+0.5)|0,1);
-      g_firstrec === 0 ? ( l_pos %= l_length; l_offs %= l_length; );
+    (rec[st_mult] > 1 && g_firstrec === 0 && cfgp_sync[] == 0) ? (
+      l_pos = ((g_cycle - rec[st_anchor]) % rec[st_mult]) * g_length + g_pos;
+      l_pos < 0 ? l_pos += rec[st_mult]*g_length;
+    ) : (
+      l_pos = g_pos;
+      div < 1 ? ( // legacy subdivision (div knob deprecated; default 1 -> no-op)
+        l_length = max((g_length*div+0.5)|0,1);
+        g_firstrec === 0 ? ( l_pos %= l_length; l_offs %= l_length; );
+      );
     );
+    wrpos = l_pos;
   );
-  wrpos = l_pos;
+  rec[st_ppos] = l_pos;   // per-track playback position (Launchpad status / UI)
   buf = this.buf + l_offs;
-  g_firstrec === 0 ? (
+  // extra_recording + rdc only for normal looped/playing tracks (not first-rec, not measuring)
+  g_firstrec === 0 && meas_state === 0 ? (
     this.extra_recording > 0 ? (
       buf[l_length + l_pos] = s; // write past the end of the loop (in case we want to trim later)
       this.dirty_top = max(this.dirty_top,l_length + l_pos + l_offs);
@@ -436,6 +564,14 @@ function chan_clear() instance(rec dirty_top idx)
     rec[st_dirty] = 0;
   );
   rec[st_lastd] = -1;   // force UI redraw
+  // loop-sync: forget length/phase + cancel any pending measure/arm so a re-record
+  // measures fresh (sync/quantize/fixlen are SETTINGS and survive a clear)
+  rec[st_mult] = 0;
+  rec[st_anchor] = 0;
+  rec[st_len] = 0;
+  rec[st_ppos] = 0;
+  this.meas_state = 0; this.meas_samples = 0; this.fppos = 0;
+  (g_arm_mask & (1<<idx)) ? (g_arm_mask -= (1<<idx));
   // if this channel was still defining the (not-yet-set) loop length, cancel it
   g_firstrec == 1 + idx ? g_firstrec = 0;
 );
@@ -447,7 +583,8 @@ function onmsg(m1,m2,m3) instance(rec,note,note2,note3,note4)
    (m2 == note && (m2 != note2 || rec[st_state]==0)) || m2 == 1024+rec+st_note1 ? (
      newstate = (rec[st_state] == 2 && g_was_firstrec==0) ? 1 : 2;
    ) : m2 == note2  || m2 == 1024+rec+st_note2 ? (
-     newstate = rec[st_state] == 2 || (rec[st_state]==0 && g_length) ? 1 : 0
+     // Super505: a stopped FREE track has its own length even when no grid exists
+     newstate = rec[st_state] == 2 || (rec[st_state]==0 && (g_length || rec[st_len])) ? 1 : 0
    ) : m2 == note3 ? (
      g_chan_selected = (g_chan_selected == this.idx) ? -1 : this.idx;
    ) : m2 == note4 || m2 == 1024+rec+st_note4 ? (
@@ -466,6 +603,27 @@ function onmsg(m1,m2,m3) instance(rec,note,note2,note3,note4)
      // Super505 count-in: a press on the channel that is counting cancels it
      (g_ci_active && this.idx == g_ci_chan) ? (
        g_ci_active = 0; g_ci_chan = -1;
+     ) :
+     // Super505 loop-sync: a press on an armed (waiting-for-downbeat) channel cancels it
+     (g_arm_mask & (1<<this.idx)) ? (
+       g_arm_mask -= (1<<this.idx);
+     ) :
+     // Super505 loop-sync: subsequent track on an existing base grid -> ARM for a
+     // quantized record start (fires at the next base downbeat -- or next beat, if
+     // this track quantizes to beats -- in @sample), instead of recording now.
+     // FREE tracks and quantize-off tracks skip arming and record immediately,
+     // measuring their own loop length. (The base/first track has g_length==0
+     // and falls through.)
+     (newstate == 2 && rec[st_state] == 0 && rec[st_dirty] == 0 && g_length > 0 && g_firstrec == 0 && cfgp_sync[] == 0 && g_active_mask != 0) ? (
+       (rec[st_sync] == 0 || rec[st_qmode] == 0) ? (
+         this.setstate(2);
+         this.meas_state = 2;
+         this.meas_samples = 0;
+         rec[st_rectempo] = tempo;
+       ) : (
+         g_arm_mask |= (1<<this.idx);
+       );
+       g_chan_selected = this.idx;
      ) :
      // arm a count-in (instead of recording now) when starting a fresh empty loop
      (newstate == 2 && rec[st_state] == 0 && rec[st_dirty] == 0 && g_countin > 0 && g_ci_active == 0) ? (
@@ -520,6 +678,81 @@ function xfadebuf(buf, osz, nsz) local(fsz,s,ds)
  
 );
 
+// ================= Super505 action dispatcher =================
+// Named actions operate on the CURRENT (selected) track. Triggered from:
+//   - Launchpad row 2 (notes 21..28 -> action ids 1..8)
+//   - the "Action trigger" slider (automation / MIDI-learn / ReaScript)
+// ids: 1=SetCurrentTrackLength1Bar  2=SetCurrentTrackLength2Bars
+//      3=SetCurrentTrackLength4Bars 4=SetCurrentTrackLength8Bars
+//      5=SetCurrentTrackSyncModeFree 6=SetCurrentTrackSyncModeMeasure
+//      7=SetCurrentTrackSyncModeMaster 8=ToggleCurrentTrackSyncMode
+
+function set_fppos_for_rec(rec, v) (
+  rec = (rec-mem_stlist)/st_num;
+  <? loop(x=0;nch, printf("rec == %d ? ch%d.fppos = v :\n",x,x+1); x+=1) ?> 0;
+);
+
+function s505_set_len_bars(n) local(rec oldlen newlen)
+(
+  g_chan_selected >= 0 ? (
+    rec = mem_stlist + g_chan_selected*st_num;
+    rec[st_fixlen] = n;   // preset: recordings on this track auto-close at n bars
+    // existing synced loop: re-snap to n bars right now (extend repeats content,
+    // shrink truncates to the first n bars); phase stays on the shared grid.
+    rec[st_state] != 2 && rec[st_dirty] > 0 && rec[st_mult] > 0 && g_length > 0 && n != rec[st_mult] ? (
+      oldlen = rec[st_mult]*g_length;
+      newlen = min(n*g_length, g_maxlen-1);
+      newlen > oldlen ? (
+        repeatbuf(rec[st_buf] + g_offs, oldlen, newlen);
+        rec[st_dirty] = max(rec[st_dirty], newlen + g_offs);
+      );
+      rec[st_mult] = max((newlen/max(g_length,1))|0, 1);
+      rec[st_len] = rec[st_mult]*g_length;
+      rec[st_anchor] = rec[st_sync] == 2 ? 0 : rec[st_anchor] % rec[st_mult];
+      rec[st_lastd] = -1;
+    );
+  );
+);
+
+function s505_set_sync(m) local(rec ph)
+(
+  g_chan_selected >= 0 ? (
+    rec = mem_stlist + g_chan_selected*st_num;
+    m != rec[st_sync] ? (
+      m == 2 && rec[st_mult] > 0 ? (
+        rec[st_anchor] = 0;              // MASTER: re-lock the loop window to bar 1
+      ) : m == 0 && rec[st_mult] > 0 && g_length > 0 ? (
+        // detach a synced loop: freeze current length + phase, continue as FREE
+        rec[st_len] = rec[st_mult]*g_length;
+        ph = (g_cycle - rec[st_anchor]) % rec[st_mult];
+        ph < 0 ? ph += rec[st_mult];
+        set_fppos_for_rec(rec, ph*g_length + g_pos);
+        rec[st_mult] = 0;
+        rec[st_anchor] = 0;
+      );
+      // FREE -> MEASURE/MASTER with existing free content: the free length rarely
+      // divides the grid, so the mode applies to the NEXT recording; playback of
+      // the current free loop is unchanged.
+      rec[st_sync] = m;
+      rec[st_lastd] = -1;
+    );
+  );
+);
+
+function s505_action(aid) local(rec)
+(
+  aid == 1 ? s505_set_len_bars(1) :
+  aid == 2 ? s505_set_len_bars(2) :
+  aid == 3 ? s505_set_len_bars(4) :
+  aid == 4 ? s505_set_len_bars(8) :
+  aid >= 5 && aid <= 7 ? s505_set_sync(aid-5) :
+  aid == 8 && g_chan_selected >= 0 ? (
+    rec = mem_stlist + g_chan_selected*st_num;
+    s505_set_sync((rec[st_sync]+1)%3);
+  );
+);
+// ==============================================================
+
 function adjustsizes(scale, repup) local(nlen,olen, lp, l, offs, nlen2)
 (
   olen = g_length;
@@ -567,6 +800,8 @@ function reset() local(lp)
       memset(lp[st_buf], 0, lp[st_dirty]);
       lp[st_dirty] = 0;
     );
+    // Super505: forget per-track loop lengths/phase too (settings survive)
+    lp[st_mult]=0; lp[st_anchor]=0; lp[st_len]=0; lp[st_ppos]=0;
     lp += st_num;
   );
   g_firstrec=g_offs=g_length=g_pos=g_cycle=g_arm_mask=0;
@@ -660,6 +895,8 @@ ext_noinit == 0 ? (
   // --- Super505 additions ---
   mem_led_last = alloc(64); // v2: 8 tracks x 8 cols (last LED code per dynamic pad)
   memset(mem_led_last, -1, 64); // -1 forces first send
+  mem_led_row2 = alloc(8);  // v1 actions: row-2 pads 21..28 (last LED code)
+  memset(mem_led_row2, -1, 8);
 
   mem_sysex_prog = alloc(9);   // "enter Programmer mode" sysex
   mem_sysex_prog[0]=0xF0; mem_sysex_prog[1]=0x00; mem_sysex_prog[2]=0x20;
@@ -708,6 +945,12 @@ cfgp_sync[] != floor(g_slider_sync+0.5) ? (
 
 (cfgp_clickcnt[]|0) != (g_slider_click_cnt|0) ? (
   cfgp_clickcnt[] = g_slider_click_cnt|0;
+);
+
+// Super505: fire a named action on the selected track, then self-reset to 0
+(g_slider_action|0) > 0 ? (
+  s505_action(g_slider_action|0);
+  g_slider_action = 0;
 );
 
 recalc_fades();
@@ -784,6 +1027,20 @@ function doconf() local(i,s) (
     x+=1;
   );
 
+  // Super505 v1: persist per-track sync mode / quantize mode / fixed-length
+  // preset (contiguous: st_sync=24, st_qmode=25, st_fixlen=26). Same
+  // file_avail back-compat guard as above.
+  loop(x=0;3,
+    file_avail(0) != 0 ? (
+      i = mem_stlist;
+      loop(g_nchan,
+        file_var(0,i[st_sync+x]);
+        i+=st_num;
+      );
+    );
+    x+=1;
+  );
+
   file_avail(0)>=0 ? ( // is reading config
     // Super505 v2: re-assert the ROWS=tracks pad layout, overriding any stale
     // note assignments restored from an older (column-layout) project. st_mute
@@ -802,7 +1059,7 @@ function doconf() local(i,s) (
     // loop-sync: phase re-locks at load (audio buffers aren't persisted), so reset
     // the master cycle and clear per-channel anchors -> st_mult still defines length.
     g_cycle = 0;
-    i = mem_stlist; loop(g_nchan, i[st_anchor]=0; i+=st_num;);
+    i = mem_stlist; loop(g_nchan, i[st_mult]=0; i[st_anchor]=0; i[st_len]=0; i[st_ppos]=0; i+=st_num;); // buffers aren't restored -> tracks start empty (sync/qmode/fixlen settings survive)
     g_slider_sync = cfgp_sync[];
     g_latchmode = cfgp_latch[];
     g_slider_click_cnt = cfgp_clickcnt[]|0;
@@ -832,6 +1089,11 @@ g_prevent_processing &= 0xd;
   );
   g_firstrec=0; 
 );
+
+// Super505: one beat of the base measure ("click cnt" = beats per bar; default 4).
+// Used by beat-quantized record starts and beat-snapped loop closes.
+g_bpb = (cfgp_clickcnt[]|0) > 0 ? (cfgp_clickcnt[]|0) : 4;
+g_beatlen = g_length > 0 ? max((g_length/g_bpb)|0,1) : 0;
 
 g_syncmode==0 || (!(play_state&1) && g_syncmode != 2) ? (
   g_active_mask==0 ? (
@@ -920,14 +1182,14 @@ g_s505_phase == 0 ? (
       midisend(0, 0x90, s505_base+4, C_UNDO_DIM);// col4 UNDO  (reserved/dim)
       s505_i += 1;
     );
-    s505_i = 11;                                  // blank unused rows 1,2,3
+    s505_i = 11;                                  // blank unused rows 1,3 (row 2 = action pads)
     loop(8,
       midisend(0, 0x90, s505_i,    C_OFF);
-      midisend(0, 0x90, s505_i+10, C_OFF);
       midisend(0, 0x90, s505_i+20, C_OFF);
       s505_i += 1;
     );
     memset(mem_led_last, -1, 64);                 // force dynamic pads to re-send
+    memset(mem_led_row2, -1, 8);                  // ...and the action row
   );
 );
 
@@ -941,11 +1203,13 @@ g_s505_phase >= 1 ? (
     s505_sel  = is_chan_selected(s505_i);
 
     // col1 REC/PLAY/OD (state color; ch2 = flashing)
-    (g_ci_active && s505_i == g_ci_chan) ? (
+    (g_arm_mask & (1<<s505_i)) ? (
+      s505_col = C_RED; s505_ch = 1;                   // armed (waiting for downbeat) -> red flash
+    ) : (g_ci_active && s505_i == g_ci_chan) ? (
       s505_col = C_AMBER; s505_ch = 1;                 // counting in -> amber flash
     ) : s505_st == 2 ? (
-      (g_firstrec == 1 + s505_i) ? ( s505_col = C_RED; s505_ch = 1; )    // first pass -> red flash
-                                  : ( s505_col = C_AMBER; s505_ch = 0; ); // overdub -> amber
+      s505_rec[st_mult] == 0 ? ( s505_col = C_RED; s505_ch = 1; )    // first-pass rec (base or measuring) -> red flash
+                             : ( s505_col = C_AMBER; s505_ch = 0; );  // overdub onto existing loop -> amber
     ) : s505_st == 1 ? ( s505_col = C_GREEN; s505_ch = 0; )              // playing
       : s505_rec[st_dirty] > 0 ? ( s505_col = C_DIM; s505_ch = 0; )      // stopped w/ content
       : ( s505_col = C_OFF; s505_ch = 0; );                             // empty
@@ -971,11 +1235,11 @@ g_s505_phase >= 1 ? (
     s505_idx = s505_i*8 + 6;
     mem_led_last[s505_idx] != s505_col ? ( mem_led_last[s505_idx]=s505_col; midisend(0,0x90,s505_base+7,s505_col); );
 
-    // col8 STATUS + SELECT (loop-position pulse; white if this track is selected)
+    // col8 STATUS + SELECT (per-track loop-position pulse; white if selected)
     s505_rec[st_dirty] > 0 ? (
       (s505_st == 1 || s505_st == 2) ? (
-        s505_locallen = max((g_length / max(s505_rec[st_div],1))|0, 1);
-        (g_pos % s505_locallen) < (((s505_locallen/8)|0) + 1) ? (
+        s505_locallen = max(track_len(s505_rec), 1);
+        (s505_rec[st_ppos] % s505_locallen) < (((s505_locallen/8)|0) + 1) ? (
           s505_col = s505_sel ? C_WHITE : C_GREEN;
         ) : (
           s505_col = C_DIM;
@@ -989,6 +1253,30 @@ g_s505_phase >= 1 ? (
     s505_idx = s505_i*8 + 7;
     mem_led_last[s505_idx] != s505_col ? ( mem_led_last[s505_idx]=s505_col; midisend(0,0x90,s505_base+8,s505_col); );
 
+    s505_i += 1;
+  );
+
+  // Row 2 = action pads: cols 1-4 length presets (1/2/4/8 bars; green = the
+  // selected track's current bars), cols 5-7 sync mode (amber = active mode),
+  // col 8 sync-mode toggle. Dim when no track is selected.
+  s505_rec  = (g_chan_selected >= 0 && g_chan_selected < min(g_nchan,5)) ? mem_stlist + g_chan_selected*st_num : -1;
+  s505_bars = s505_rec >= 0 ? (s505_rec[st_mult] > 0 ? s505_rec[st_mult] : s505_rec[st_fixlen]) : 0;
+  s505_sync = s505_rec >= 0 ? s505_rec[st_sync] : -1;
+  s505_i = 0;
+  loop(8,
+    s505_col =
+      s505_i == 0 ? (s505_bars == 1 ? C_GREEN : C_UTIL) :
+      s505_i == 1 ? (s505_bars == 2 ? C_GREEN : C_UTIL) :
+      s505_i == 2 ? (s505_bars == 4 ? C_GREEN : C_UTIL) :
+      s505_i == 3 ? (s505_bars == 8 ? C_GREEN : C_UTIL) :
+      s505_i == 4 ? (s505_sync == 0 ? C_AMBER : C_UTIL) :
+      s505_i == 5 ? (s505_sync == 1 ? C_AMBER : C_UTIL) :
+      s505_i == 6 ? (s505_sync == 2 ? C_AMBER : C_UTIL) :
+      C_UTIL;
+    mem_led_row2[s505_i] != s505_col ? (
+      mem_led_row2[s505_i] = s505_col;
+      midisend(0, 0x90, 21+s505_i, s505_col);
+    );
     s505_i += 1;
   );
 );
@@ -1005,6 +1293,8 @@ function chan_onmsg(m1,m2,m3)
   );
 
   m2 == cfgp_playall[] || m2 == 1024+cfgp_playall ? play_or_stop_all();
+  // Super505: Launchpad row 2 = action pads (length presets + sync mode)
+  m2 >= 21 && m2 <= 28 ? s505_action(m2-20);
   <? loop(x=0;nch, printf("ch%d.onmsg(m1,m2,m3);\n",x+=1)) ?>
 );
 
@@ -1125,15 +1415,41 @@ g_prevent_processing===0 ? (
 
   g_firstrec !== 0 ? (
      (g_pos+=1) >= g_maxlen ? (
+       mem_stlist[(g_firstrec-1)*st_num + st_mult]=1;   // loop-sync: base track = 1x
+       mem_stlist[(g_firstrec-1)*st_num + st_anchor]=0;
+       mem_stlist[(g_firstrec-1)*st_num + st_len]=g_length;
        g_firstrec=0;
        g_pos=0;
+       g_cycle=0;
      ) : (
        g_length = g_pos *
             ((g_firstrec > 0 && g_firstrec < 1 + g_nchan) ?
               mem_stlist[(g_firstrec-1)*st_num + st_div] : 1);
+       // fixed-length preset on the base track: auto-close the recording once it
+       // reaches N bars of the tempo captured at record start (project time sig)
+       g_s505_fix = mem_stlist[(g_firstrec-1)*st_num + st_fixlen];
+       g_s505_fix > 0 && g_length >=
+         ((g_s505_fix * srate * ts_num * 240 /
+           (max(mem_stlist[(g_firstrec-1)*st_num + st_rectempo],1) * ts_denom))|0) ? (
+         setstate_for_rec(mem_stlist + (g_firstrec-1)*st_num, 1);
+       );
      );
   ) : (
-    (g_pos += 1) >= g_length ? ( g_pos=0; g_cycle += 1; ); // loop-sync: advance base measure
+    (g_pos += 1) >= g_length ? (
+      g_pos = 0; g_cycle += 1;                  // loop-sync: advance base measure
+      g_arm_mask ? (  // bar-quantized (default) armed channels start at the downbeat
+        <? loop(x=0;nch,
+             printf("(g_arm_mask & %d) && mem_stlist[%d*st_num+st_qmode] != 1 ? ( g_arm_mask -= %d; mem_stlist[%d*st_num+st_anchor]=g_cycle; mem_stlist[%d*st_num+st_rectempo]=tempo; ch%d.setstate(2); ch%d.meas_state=1; ch%d.meas_samples=0; );\n",
+                    1<<x, x, 1<<x, x, x, x+1, x+1, x+1); x+=1) ?>
+      );
+    );
+    // beat-quantized armed channels start at ANY beat boundary (incl. the downbeat);
+    // they measure their own free length, beat-snapped on close.
+    g_arm_mask && g_beatlen > 0 && (g_pos % g_beatlen) == 0 ? (
+      <? loop(x=0;nch,
+           printf("(g_arm_mask & %d) && mem_stlist[%d*st_num+st_qmode] == 1 ? ( g_arm_mask -= %d; mem_stlist[%d*st_num+st_rectempo]=tempo; ch%d.setstate(2); ch%d.meas_state=2; ch%d.meas_samples=0; );\n",
+                  1<<x, x, 1<<x, x, x+1, x+1, x+1); x+=1) ?>
+    );
   );
 );
 
@@ -1504,6 +1820,11 @@ function draw(ixpos, ypos) local(i i2 w h gap rec mode force_redraw rowsize
     is_chan_selected(i) ? mode|=8;
     rec[st_dirty] ? mode|=16;
     mode |= rec[st_monmode] << 8;
+    // Super505: fold per-track length/sync state into the redraw hash
+    mode |= min(rec[st_mult],63) << 16;
+    mode |= rec[st_sync] << 22;
+    mode |= min(rec[st_fixlen],15) << 24;
+    rec[st_mult]==0 && rec[st_len]>0 ? mode |= 1<<28;
     g_firstrec ? mode |= 1<<30;
   
     force_redraw || rec[st_lastd] != mode || ((mode&2) && now>rec[st_lastpkupd]+0.5) ? (
@@ -1514,11 +1835,26 @@ function draw(ixpos, ypos) local(i i2 w h gap rec mode force_redraw rowsize
       gfx_set(1,1,1);
       gfx_x = xpos + 8;
       gfx_y = ypos + 8;
-      gfx_printf("%d",i+1);    
+      gfx_printf("%d",i+1);
+
+      // Super505: per-track loop length + sync mode ("8x M" = 8 bars measure-sync,
+      // "free" = own unsnapped length, "(4)" = 4-bar preset armed for next rec)
+      w > 60 ? (
+        gfx_set(0.75);
+        gfx_x = xpos + 22;
+        gfx_y = ypos + 8;
+        rec[st_mult] > 0 ? (
+          gfx_printf("%dx %s", rec[st_mult], rec[st_sync]==2 ? "S" : rec[st_sync]==0 ? "F" : "M");
+        ) : rec[st_len] > 0 ? (
+          gfx_printf("free");
+        ) : rec[st_fixlen] > 0 ? (
+          gfx_printf("(%d) %s", rec[st_fixlen], rec[st_sync]==2 ? "S" : rec[st_sync]==0 ? "F" : "M");
+        );
+      );
 
       gfx_set(0.5);
-      w > 80 && rec[st_dirty] && (wl = floor(g_length/rec[st_div] + 0.5)) > 0 ?
-        draw_waveform(xpos+gap,ypos+h*.5,floor(w/rec[st_div]+.5)-2*gap,h*.25, rec[st_buf], (g_offs % wl),wl, i);
+      w > 80 && rec[st_dirty] && (wl = track_len(rec)) > 0 ?
+        draw_waveform(xpos+gap,ypos+h*.5,floor(w/rec[st_div]+.5)-2*gap,h*.25, rec[st_buf], (rec[st_mult]==0 && rec[st_len]>0) ? 0 : (g_offs % wl),wl, i);
 
       rec[st_monmode]==0 ? (
         gfx_set(0.2)
@@ -1954,8 +2290,8 @@ function export()  local(rec, flag, tidx, idx, ster, l)
     !(idx&1) || get_linked_rec(idx)<0 ? (
       ster = get_linked_rec(idx);
       rec[st_state] ? (
-        l = (g_length / rec[st_div])|0;
-        export_buffer_to_project(rec[st_buf]+g_offs%l,l, ster>=0 ? 2 : 1,srate,tidx, flag,
+        l = max(track_len(rec),1);   // Super505: export each track at its own loop length
+        export_buffer_to_project(rec[st_buf]+((rec[st_mult]==0 && rec[st_len]>0) ? 0 : g_offs%l),l, ster>=0 ? 2 : 1,srate,tidx, flag,
           flag?(cfgp_sync[] ? tempo : estbpm(g_length)),
           ster>=0 ? ster[st_buf] - rec[st_buf] : 0
         );

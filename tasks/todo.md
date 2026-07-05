@@ -118,3 +118,20 @@ gotchas, and the open design questions are documented in
 subdivisions of a shared master length vs. truly independent lengths) — doc 06 §7.
 Then: multi-instrument template (drum/gtr1/gtr2/mic → ch1–4), per-track volume/mute,
 save `.rpp` template, utility row, git push (HTTPS→SSH).
+
+## v1 independent track lengths (2026-07-05) — CODE COMPLETE, pending live verify
+
+Implemented per doc 06 §7 (now the design record). Summary:
+- [x] Per-track `st_len`/`st_mult`/`st_ppos`/`st_rectempo`/`st_sync`/`st_qmode`/`st_fixlen`.
+- [x] Sync modes FREE / MEASURE_SYNC (default) / MASTER_SYNC; quantize off/beat/bar (default bar).
+- [x] Action dispatcher: `SetCurrentTrackLength{1,2,4,8}Bars`, `SetCurrentTrackSyncMode{Free,Measure,Master}`,
+      `ToggleCurrentTrackSyncMode` — Launchpad row 2 (notes 21–28) + "Action trigger" slider.
+- [x] Launchpad col-8 status shows each track's OWN loop position (`st_ppos`); row-2 LEDs
+      show selected track's bars (green) + sync mode (amber).
+- [x] AllStart/AllStop preserve per-track lengths; kill/clear forget lengths but keep settings.
+- [x] Serialization: sync/qmode/fixlen persist per track (back-compat guarded).
+- [x] Tests: `cd tests && pytest` — 18 passing (sample-accurate engine model, 120 BPM spec scenario).
+- [x] Deployed to `~/.config/REAPER/Effects/loopsamplers/super505`
+      (backup: `super505.pre-v1len.bak`).
+- [ ] **Live verify** (Reaper was running during deploy — remove/re-add the FX to compile):
+      1-bar drum + 8-bar guitar workflow, LEDs, row-2 action pads, AllStart/AllStop.
