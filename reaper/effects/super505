@@ -83,7 +83,7 @@ out_pin:click output
 config: nch "Channels" 8 1 2 4 8="8 (namesake)" 12 16 24 32 48
 config: maxmem "Memory Size -preserve-config" 256 64="64MB - max length 0:23 for 8 channels @ 44.1kHz" 128="128MB - max length 0:47 for 8 channels @ 44.1kHz" 256="256MB (default) - max length 1:35 for 8 channels @ 44.1kHz" 512="512MB - max length 3:10 for 8 channels @ 44.1kHz" 1024="1GB - max length 6:20 for 8 channels @ 44.1kHz"
 
-options: maxmem=<? printf("%d",maxmem*1024*128); ?> no_meter gfx_idle prealloc=* 
+options: maxmem=<? printf("%d",maxmem*1024*128); ?> no_meter gfx_idle prealloc=* gmem=Super505
 
 slider1:g_slider_sync=0<0,2,1{off,project,playback}>-Sync
 slider4:g_slider_click_cnt=0<0,64,1>-Click count/length
@@ -1143,13 +1143,28 @@ function onblock()
 );
 
 // Super505: compute the solo mask once per block, before the per-channel onblock().
+// Same pass also builds the "wants live input" mask (armed for a quantized start,
+// recording/overdubbing, or counting in) published to gmem for the arm bridge.
 g_solo_mask = 0;
+g_s505_wantmask = g_arm_mask;
 s505_i = 0;
 loop(g_nchan,
   mem_stlist[s505_i*st_num + st_solo] ? (g_solo_mask |= (1<<s505_i));
+  mem_stlist[s505_i*st_num + st_state] == 2 ? (g_s505_wantmask |= (1<<s505_i));
   s505_i += 1;
 );
 g_any_solo = g_solo_mask != 0;
+g_ci_active && g_ci_chan >= 0 ? (g_s505_wantmask |= (1<<g_ci_chan));
+
+// --- Super505 arm bridge (gmem protocol, namespace "Super505") ---
+// scripts/super505_arm_bridge.lua watches these and record-arms whichever
+// REAPER tracks send into the flagged looper channels.
+//   gmem[0] = heartbeat (increments every block while the FX runs)
+//   gmem[1] = want-input bitmask (bit N = looper channel N+1)
+//   gmem[2] = channel count
+gmem[0] += 1;
+gmem[1] = g_s505_wantmask;
+gmem[2] = g_nchan;
 <? loop(x=0;nch, printf("ch%d.onblock();\n",x+=1)) ?>
 
 (g_click_int = (cfgp_clickcnt[]|0)) > 0 ?( 

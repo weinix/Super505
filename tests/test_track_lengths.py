@@ -259,6 +259,38 @@ class TestQuantize:
             "quantize-off records immediately mid-bar"
 
 
+class TestArmBridgeMask:
+    """gmem[1] protocol for super505_arm_bridge.lua: a channel's bit is set
+    exactly while it wants live input (armed / recording / overdubbing)."""
+
+    def test_mask_follows_the_record_lifecycle(self):
+        e = make_engine()
+        assert e.want_input_mask() == 0
+        e.select(0)
+        e.action(1)                # 1-bar preset
+        e.press_rec(0)
+        assert e.want_input_mask() == 0b1, "recording base track wants input"
+        e.run(2 * BAR)             # auto-closes at 1 bar -> playing
+        assert e.want_input_mask() == 0
+
+        e.run(100)
+        e.press_rec(1)             # arms track 2
+        assert e.want_input_mask() == 0b10, "ARMED channel wants input early"
+        e.run_until_downbeat()     # fires -> recording
+        assert e.want_input_mask() == 0b10
+        e.run(8 * BAR)
+        e.press_rec(1)             # close -> play
+        assert e.want_input_mask() == 0
+
+    def test_overdub_wants_input_again(self):
+        e = make_engine()
+        record_base_1bar(e)
+        e.press_rec(0)             # play -> overdub
+        assert e.want_input_mask() == 0b1
+        e.press_rec(0)             # overdub -> play
+        assert e.want_input_mask() == 0
+
+
 class TestArmCancelAndClear:
     def test_press_on_armed_channel_cancels(self):
         e = make_engine()

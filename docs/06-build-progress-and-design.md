@@ -182,6 +182,16 @@ engine.
 (mult tracks don't rescale); FREE→MEASURE with existing content applies to the
 next recording; beat-quantized tracks use the free-position engine internally.
 
+**Arm bridge (2026-07-05).** REAPER only passes live input through record-armed,
+monitored tracks — unarmed source tracks made looper rows record silence. The JSFX
+now publishes a per-channel "wants live input" bitmask (armed / recording /
+count-in) to gmem namespace `Super505` (`[0]` heartbeat, `[1]` mask, `[2]` nchan);
+`reaper/scripts/super505_arm_bridge.lua` (auto-started by `Scripts/__startup.lua`)
+watches it and record-arms whichever tracks *send into* that looper channel — the
+mapping follows the project routing, not track order. One-way: the bridge never
+disarms (disarming would cut live monitoring through the looper). If a flagged
+channel has no feeding send, it prints a console warning naming the missing send.
+
 ---
 
 ## 8. Other open items / candidate next features

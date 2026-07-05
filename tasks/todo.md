@@ -133,5 +133,23 @@ Implemented per doc 06 §7 (now the design record). Summary:
 - [x] Tests: `cd tests && pytest` — 18 passing (sample-accurate engine model, 120 BPM spec scenario).
 - [x] Deployed to `~/.config/REAPER/Effects/loopsamplers/super505`
       (backup: `super505.pre-v1len.bak`).
-- [ ] **Live verify** (Reaper was running during deploy — remove/re-add the FX to compile):
-      1-bar drum + 8-bar guitar workflow, LEDs, row-2 action pads, AllStart/AllStop.
+- [x] **Live verify**: 1-bar drum + 8-bar guitar independent lengths confirmed working (2026-07-05).
+- [ ] Live verify remaining: FREE mode, row-2 action pads, MASTER_SYNC, AllStart/AllStop.
+
+## Arm bridge (2026-07-05) — CODE COMPLETE, pending live verify
+
+Pressing rec on looper rows 1-5 auto record-arms the REAPER track(s) feeding that
+looper channel (fixes "rows 3-5 record silence because source tracks weren't armed").
+- [x] JSFX publishes to gmem namespace `Super505`: [0]=heartbeat, [1]=want-input
+      bitmask (armed / recording / count-in channels), [2]=nchan.
+- [x] `reaper/scripts/super505_arm_bridge.lua`: defer loop, on a rising mask bit
+      finds the track(s) whose receive on the looper covers that channel (mapping
+      follows the SENDS, not track order) and sets I_RECARM + I_RECMON. One-way:
+      never auto-disarms. Warns in the console if a channel has no feeding send.
+- [x] `reaper/scripts/__startup.lua` auto-starts the bridge at REAPER launch.
+- [x] Deployed: JSFX + both scripts to `~/.config/REAPER` (Scripts/, Effects/).
+- [x] Model tests for the gmem mask protocol (20 passing total).
+- [ ] **Live verify**: restart REAPER (or Actions -> run `super505_arm_bridge.lua`
+      once) + re-add the FX; press rec on row 3/4 -> Vocal/Bass tracks arm.
+      NOTE: sends must exist (Bass Guitar still needs a send -> looper ch, see
+      routing fix); the bridge prints a console warning if a send is missing.

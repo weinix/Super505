@@ -365,6 +365,17 @@ class Engine:
                 self._sample_in_block = 0
                 self._block()
 
+    def want_input_mask(self):
+        """mirrors g_s505_wantmask published to gmem[1] in @block: channels armed
+        for a quantized record start, recording/overdubbing (state 2), or counting
+        in (count-in not modeled here). The arm-bridge ReaScript record-arms the
+        REAPER tracks feeding these looper channels."""
+        mask = self.arm_mask
+        for i, t in enumerate(self.tracks):
+            if t.state == 2:
+                mask |= (1 << i)
+        return mask
+
     def run_until_downbeat(self, max_samples=None):
         """advance to the next sample where g_pos == 0 (a bar boundary)"""
         limit = max_samples if max_samples is not None else self.g_length + 1
