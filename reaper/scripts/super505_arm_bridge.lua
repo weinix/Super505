@@ -1,4 +1,4 @@
--- super505_arm_bridge.lua — mirror looper-channel record state onto source tracks
+-- super505_arm_bridge.lua — record-arm source tracks when looper channels want input
 --
 -- The Super505 JSFX publishes (gmem namespace "Super505"):
 --   gmem[0] = heartbeat (increments every audio block while the FX runs)
@@ -6,19 +6,13 @@
 --             quantized record start, recording/overdubbing, or counting in)
 --   gmem[2] = looper channel count
 --
--- TWO-WAY mirror: whenever the mask changes, every REAPER track that sends into
--- the looper is reconciled --
---   * feeds a channel that wants input  -> record-armed (+ input monitoring on)
---   * feeds only idle/playing channels  -> DISARMED
--- so a source track is armed exactly while its looper row records. The mapping
--- follows the receives on the looper track (project routing, not track order).
+-- When a bit RISES, this script finds every REAPER track that sends into that
+-- looper channel (so the mapping follows the project routing, not track order)
+-- and record-arms it + enables input monitoring. REAPER only passes live input
+-- through armed, monitored tracks, so without this the looper records silence.
 --
--- Note the trade-off: while a row is idle/playing, its source track is unarmed,
--- so that instrument's LIVE input no longer reaches the looper's monitor path.
---
--- Tracks that do NOT send into the looper are never touched. Reconciliation
--- runs only when the mask CHANGES, so manual arm tweaks between looper events
--- stick until the next rec press / record close.
+-- One-way by design: the bridge never DISARMS tracks (disarming would cut live
+-- monitoring of that instrument through the looper). Disarm manually if wanted.
 --
 -- Install: run once per session (Actions -> Load ReaScript), or let
 -- Scripts/__startup.lua launch it automatically at REAPER startup.
@@ -46,53 +40,43 @@ local function find_looper_track()
   return nil
 end
 
--- Reconcile every looper-feeding track's arm state against the want mask.
--- `rising` = bits that just turned on (used for missing-send warnings only).
-local function reconcile(mask, rising)
+-- all tracks whose receive on the looper covers looper channel `ch` (0-based)
+local function sources_for_channel(lp, ch)
+  local out = {}
+  for i = 0, reaper.GetTrackNumSends(lp, -1) - 1 do
+    local dst = math.floor(reaper.GetTrackSendInfo_Value(lp, -1, i, "I_DSTCHAN"))
+    local covered
+    if dst >= 1024 then                    -- mono receive into channel (dst-1024)
+      covered = (dst - 1024) == ch
+    else                                   -- stereo receive into dst / dst+1
+      covered = dst == ch or (dst + 1) == ch
+    end
+    if covered then
+      local src = reaper.GetTrackSendInfo_Value(lp, -1, i, "P_SRCTRACK")
+      if src and reaper.ValidatePtr2(0, src, "MediaTrack*") then
+        out[#out + 1] = src
+      end
+    end
+  end
+  return out
+end
+
+local function arm_sources(ch)
   if not (looper and reaper.ValidatePtr2(0, looper, "MediaTrack*")) then
     looper = find_looper_track()
-    if not looper then return end
+    if not looper then return false end
   end
-
-  local bytrack = {}   -- guid -> {tr=MediaTrack, wanted=bool}
-  local covered = 0    -- channels that have at least one feeding send
-  for i = 0, reaper.GetTrackNumSends(looper, -1) - 1 do
-    local dst = math.floor(reaper.GetTrackSendInfo_Value(looper, -1, i, "I_DSTCHAN"))
-    local chans = (dst >= 1024) and { dst - 1024 } or { dst, dst + 1 }
-    local src = reaper.GetTrackSendInfo_Value(looper, -1, i, "P_SRCTRACK")
-    if src and reaper.ValidatePtr2(0, src, "MediaTrack*") then
-      local guid = reaper.GetTrackGUID(src)
-      local e = bytrack[guid]
-      if not e then
-        e = { tr = src, wanted = false }
-        bytrack[guid] = e
-      end
-      for _, ch in ipairs(chans) do
-        covered = covered | (1 << ch)
-        if (mask & (1 << ch)) ~= 0 then e.wanted = true end
-      end
+  local srcs = sources_for_channel(looper, ch)
+  if #srcs == 0 then return false end
+  for _, tr in ipairs(srcs) do
+    if reaper.GetMediaTrackInfo_Value(tr, "I_RECARM") ~= 1 then
+      reaper.SetMediaTrackInfo_Value(tr, "I_RECARM", 1)
+    end
+    if reaper.GetMediaTrackInfo_Value(tr, "I_RECMON") == 0 then
+      reaper.SetMediaTrackInfo_Value(tr, "I_RECMON", 1)
     end
   end
-
-  for _, e in pairs(bytrack) do
-    local want = e.wanted and 1 or 0
-    if reaper.GetMediaTrackInfo_Value(e.tr, "I_RECARM") ~= want then
-      reaper.SetMediaTrackInfo_Value(e.tr, "I_RECARM", want)
-    end
-    if e.wanted and reaper.GetMediaTrackInfo_Value(e.tr, "I_RECMON") == 0 then
-      reaper.SetMediaTrackInfo_Value(e.tr, "I_RECMON", 1)
-    end
-  end
-
-  -- warn (once per episode) about wanted channels that nothing feeds
-  local orphan = rising & ~covered & ~warned
-  for ch = 0, 15 do
-    if (orphan & (1 << ch)) ~= 0 then
-      warned = warned | (1 << ch)
-      reaper.ShowConsoleMsg(("super505_arm_bridge: no track sends into looper channel %d - add a send (Track -> Super505 Looper, dest channel %d)\n")
-        :format(ch + 1, ch + 1))
-    end
-  end
+  return true
 end
 
 local function tick()
@@ -110,7 +94,18 @@ local function tick()
     if mask ~= last_mask then
       local rising = mask & ~last_mask
       warned = warned & mask            -- forget warnings for cleared bits
-      reconcile(mask, rising)
+      if rising ~= 0 then
+        for ch = 0, 15 do
+          local bit = 1 << ch
+          if (rising & bit) ~= 0 then
+            if not arm_sources(ch) and (warned & bit) == 0 then
+              warned = warned | bit
+              reaper.ShowConsoleMsg(("super505_arm_bridge: no track sends into looper channel %d - add a send (Track -> Super505 Looper, dest channel %d)\n")
+                :format(ch + 1, ch + 1))
+            end
+          end
+        end
+      end
       last_mask = mask
     end
   end
