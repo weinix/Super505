@@ -102,6 +102,10 @@ that track's own `length`. Consequences:
 - Overdubs **stack additively** (no auto-normalization — RC-505/looper convention);
   per-track `gain` and the mixer manage levels. Punch-in/out use the rec envelope
   so a layer never clicks at its start/end.
+- **`overdub_feedback` (v1 = 1.0, reserved/future-safe):** overdub writes
+  `buf[pos] = buf[pos]·overdub_feedback + in·recgain`. At 1.0 this is pure additive
+  layering (the approved v1 default); a future <1.0 would decay older layers
+  (RC-505 feedback). The one-multiply hook is wired; NO control UI in v1.
 - Tracks of different lengths overdub **independently** — each accumulates onto its
   own buffer at its own position; they never cross-contaminate.
 

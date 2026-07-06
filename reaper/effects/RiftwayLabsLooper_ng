@@ -1,0 +1,440 @@
+desc:RiftwayLabsLooper NG — clean-room looper engine (RiftwayLabs)
+version:0.1
+tags:looper midi sampler
+
+// ===========================================================================
+// RiftwayLabsLooper NG — independent clean-room looper engine.
+// (C) 2026 RiftwayLabs. Implemented from the RiftwayLabsLooper feature spec +
+// RC-505 behavior + the JSFX/EEL2 & REAPER platform contract, and matched to the
+// reference model tests/riftway_engine_model.py. NOT derived from Cockos Super8 —
+// this file shares no code expression with it (own architecture: per-track
+// independent clocks, flat track array, staged pipeline). See
+// docs/09-independent-engine.md.  [P2 core: headless, drivable via Launchpad.]
+// ===========================================================================
+
+<? nch < 1 ? nch = 6 ?>
+<?
+  loop(x=0;nch, printf("in_pin:in %d\n", x+1));
+  loop(x=0;nch, printf("out_pin:out %d\n", x+1));
+?>
+
+options:gmem=RiftwayLabs no_meter gfx_idle maxmem=33554432 prealloc=*
+
+slider1:g_slider_action=0<0,8,1{-,Len1Bar,Len2Bars,Len4Bars,Len8Bars,SyncFree,SyncMeasure,SyncMaster,SyncToggle}>-Action trigger (selected track, self-resets)
+
+@init
+g_nch = <? printf("%d", nch) ?>;
+
+// --- track record layout (flat array; RiftwayLabs field ids) ---
+T_STATE=0; T_BUF=1; T_LEN=2; T_POS=3; T_SYNC=4; T_BARS=5; T_FIXLEN=6; T_QMODE=7;
+T_GAIN=8; T_MUTE=9; T_SOLO=10; T_ANCHOR=11; T_RECTEMPO=12; T_RECENV=13; T_PLAYENV=14;
+T_RECTGT=15; T_PLAYTGT=16; T_MEAS=17; T_MEASCNT=18; T_ARMED=19;
+T_NREC=20; T_NSTOP=21; T_NSEL=22; T_NCLEAR=23; T_NMUTE=24; T_NSOLO=25;
+T_NUM=26;
+
+// state / policy enums
+S_EMPTY=0; S_REC=1; S_OVERDUB=2; S_PLAY=3; S_STOP=4;
+SY_FREE=0; SY_MEAS=1; SY_MASTER=2;
+Q_OFF=0; Q_BEAT=1; Q_BAR=2;
+M_NONE=0; M_SYNCED=1; M_FREE=2;
+
+// Launchpad Pro MK3 LED palette (Programmer mode velocities)
+C_OFF=0; C_RED=5; C_AMBER=9; C_GREEN=21; C_DIM=45;
+
+g_overdub_fb = 1.0;   // v1: additive overdub, no decay (reserved param)
+
+function recalc_slopes() (
+  g_s_recin  = 1.0 / max(srate*0.002, 1);
+  g_s_recout = 1.0 / max(srate*0.004, 1);
+  g_s_play   = 1.0 / max(srate*0.005, 1);
+  g_xfade    = max(srate*0.005, 1)|0;
+);
+recalc_slopes();
+
+// ---- leaf helpers -----------------------------------------------------------
+function eqpow(e) ( sin(max(0,min(1,e)) * $pi * 0.5); );
+
+function approach(v, tgt, up, dn) (
+  tgt > v ? min(v+up, tgt) : tgt < v ? max(v-dn, tgt) : v;
+);
+
+function trk(i) ( mem_tracks + i*T_NUM; );
+
+function advance_pos(tp) (
+  (tp[T_POS] += 1) >= tp[T_LEN] ? tp[T_POS] = 0;
+);
+
+function grid_phase(tp) local(ph) (
+  (tp[T_BARS] <= 0 || g_grid_len == 0) ? 0 : (
+    ph = (g_grid_cycle - tp[T_ANCHOR]) % tp[T_BARS];
+    ph < 0 ? ph += tp[T_BARS];
+    (ph * g_grid_len + g_grid_pos) % tp[T_LEN];
+  );
+);
+
+// LINEAR loop-join crossfade (head/tail are correlated -> linear preserves level)
+function apply_xfade(tp) local(L n k a) (
+  L = tp[T_LEN];
+  n = L > 1 ? min(g_xfade, L>>1) : 0;
+  k = 0;
+  while (k < n) (
+    a = k / n;
+    tp[T_BUF][k] = tp[T_BUF][k]*a + tp[T_BUF][L-n+k]*(1-a);
+    k += 1;
+  );
+);
+
+// ---- record / play transitions ---------------------------------------------
+function close_record(i) local(tp bars len k) (
+  tp = trk(i);
+  (tp[T_MEAS]==M_SYNCED && g_grid_len==0) ? (
+    // base track: its recording defines the base measure
+    bars = max(tp[T_FIXLEN]|0, 1);
+    g_grid_len = max(floor(tp[T_MEASCNT]/bars + 0.5), 1);
+    tp[T_BARS] = bars;
+    tp[T_ANCHOR] = 0;
+    len = tp[T_BARS]*g_grid_len;
+  ) : tp[T_MEAS]==M_SYNCED ? (
+    tp[T_BARS] = tp[T_FIXLEN] > 0 ? max(tp[T_FIXLEN]|0,1)
+                                  : max(floor(tp[T_MEASCNT]/max(g_grid_len,1)+0.5), 1);
+    len = tp[T_BARS]*g_grid_len;
+    tp[T_SYNC]==SY_MASTER ? tp[T_ANCHOR]=0;
+  ) : (
+    // free / beat-quantized: keep exact recorded length (beat-snapped)
+    len = tp[T_MEASCNT];
+    (tp[T_QMODE]==Q_BEAT && g_grid_len>0) ? len = max(floor(len/g_beat+0.5),1)*g_beat;
+    tp[T_BARS] = 0;
+  );
+  len = max(min(len, g_maxlen-1), 1);
+  k = tp[T_MEASCNT]; while (k < len) ( tp[T_BUF][k]=0; k+=1; );  // zero rounded-up tail
+  tp[T_LEN] = len;
+  apply_xfade(tp);
+  tp[T_POS] = tp[T_BARS] > 0 ? grid_phase(tp) : 0;
+  tp[T_MEAS] = M_NONE;
+  tp[T_STATE] = S_PLAY;
+  tp[T_RECTGT] = 0;
+  tp[T_PLAYTGT] = 1;
+);
+
+function begin_record(i) local(tp) (
+  tp = trk(i);
+  tp[T_RECTEMPO] = tempo;
+  tp[T_RECENV] = 0; tp[T_RECTGT] = 1;
+  tp[T_MEASCNT] = 0;
+  tp[T_SYNC]==SY_FREE ? ( tp[T_STATE]=S_REC; tp[T_MEAS]=M_FREE; ) :
+  g_grid_len==0 ? ( tp[T_STATE]=S_REC; tp[T_MEAS]=M_SYNCED; tp[T_ANCHOR]=0; g_grid_pos=0; g_grid_cycle=0; ) :
+  tp[T_QMODE]==Q_OFF ? ( tp[T_STATE]=S_REC; tp[T_MEAS]=M_FREE; ) :
+  ( tp[T_ARMED]=1; );
+);
+
+function fire_armed(i) local(tp) (
+  tp = trk(i);
+  tp[T_ARMED]=0; tp[T_STATE]=S_REC; tp[T_RECTEMPO]=tempo;
+  tp[T_ANCHOR]=g_grid_cycle; tp[T_MEASCNT]=0; tp[T_RECENV]=0; tp[T_RECTGT]=1;
+  tp[T_MEAS] = tp[T_QMODE]==Q_BAR ? M_SYNCED : M_FREE;
+);
+
+function begin_overdub(i) local(tp) ( tp=trk(i); tp[T_STATE]=S_OVERDUB; tp[T_RECENV]=0; tp[T_RECTGT]=1; tp[T_PLAYTGT]=1; );
+function end_overdub(i)   local(tp) ( tp=trk(i); tp[T_STATE]=S_PLAY; tp[T_RECTGT]=0; tp[T_PLAYTGT]=1; );
+function start_play(i)    local(tp) ( tp=trk(i); tp[T_STATE]=S_PLAY; tp[T_POS]= tp[T_SYNC]==SY_FREE ? 0 : grid_phase(tp); tp[T_PLAYTGT]=1; tp[T_RECTGT]=0; );
+function stop_trk(i)      local(tp) ( tp=trk(i); tp[T_STATE]=S_STOP; tp[T_PLAYTGT]=0; tp[T_RECTGT]=0; );
+
+function clear_trk(i) local(tp k) (
+  tp=trk(i); k=0; while (k < tp[T_LEN]) ( tp[T_BUF][k]=0; k+=1; );
+  tp[T_STATE]=S_EMPTY; tp[T_LEN]=0; tp[T_POS]=0; tp[T_BARS]=0; tp[T_ANCHOR]=0;
+  tp[T_MEAS]=0; tp[T_MEASCNT]=0; tp[T_ARMED]=0;
+  tp[T_RECENV]=0; tp[T_PLAYENV]=0; tp[T_RECTGT]=0; tp[T_PLAYTGT]=0;
+);
+
+// ---- action dispatcher (rl_action; FCB1010 + Launchpad row 2 land here) -----
+function set_len_bars(n) local(tp oldlen newlen k) (
+  g_sel >= 0 ? (
+    tp = trk(g_sel);
+    tp[T_FIXLEN] = n;
+    (tp[T_STATE]!=S_REC && tp[T_LEN]>0 && tp[T_BARS]>0 && g_grid_len>0 && n!=tp[T_BARS]) ? (
+      oldlen = tp[T_BARS]*g_grid_len;
+      newlen = min(n*g_grid_len, g_maxlen);
+      newlen > oldlen ? ( k=oldlen; while (k<newlen) ( tp[T_BUF][k]=tp[T_BUF][k%oldlen]; k+=1; ); );
+      tp[T_BARS] = max((newlen/max(g_grid_len,1))|0, 1);
+      tp[T_LEN]  = tp[T_BARS]*g_grid_len;
+    );
+  );
+);
+
+function set_sync(m) local(tp) (
+  g_sel >= 0 ? (
+    tp = trk(g_sel);
+    m != tp[T_SYNC] ? (
+      (m==SY_MASTER && tp[T_BARS]>0) ? tp[T_ANCHOR]=0 :
+      (m==SY_FREE && tp[T_BARS]>0 && g_grid_len>0) ? (
+        tp[T_LEN] = tp[T_BARS]*g_grid_len;
+        tp[T_POS] = grid_phase(tp);
+        tp[T_BARS] = 0; tp[T_ANCHOR]=0;
+      );
+      tp[T_SYNC] = m;
+    );
+  );
+);
+
+function rl_action(aid) (
+  aid==1 ? set_len_bars(1) :
+  aid==2 ? set_len_bars(2) :
+  aid==3 ? set_len_bars(4) :
+  aid==4 ? set_len_bars(8) :
+  (aid>=5 && aid<=7) ? set_sync(aid-5) :
+  (aid==8 && g_sel>=0) ? set_sync((trk(g_sel)[T_SYNC]+1)%3);
+);
+
+function press_rec(i) local(tp st) (
+  tp = trk(i);
+  tp[T_ARMED] ? ( tp[T_ARMED]=0; ) : (
+    st = tp[T_STATE];
+    st==S_EMPTY   ? begin_record(i) :
+    st==S_REC     ? close_record(i) :
+    st==S_PLAY    ? begin_overdub(i) :
+    st==S_OVERDUB ? end_overdub(i) :
+    st==S_STOP    ? start_play(i);
+    g_sel = i;
+  );
+);
+
+function press_stop(i) local(tp st) (
+  tp = trk(i);
+  tp[T_ARMED] ? ( tp[T_ARMED]=0; ) : (
+    st = tp[T_STATE];
+    st==S_REC     ? close_record(i) :
+    st==S_OVERDUB ? end_overdub(i) :
+    st==S_PLAY    ? stop_trk(i) :
+    (st==S_STOP && tp[T_LEN]>0) ? start_play(i);
+    g_sel = i;
+  );
+);
+
+function all_stop() local(i tp) (
+  i=0; loop(g_nch, tp=trk(i);
+    tp[T_STATE]==S_REC ? close_record(i) : tp[T_STATE]==S_OVERDUB ? end_overdub(i);
+    (tp[T_STATE]==S_PLAY || tp[T_STATE]==S_OVERDUB) ? stop_trk(i);
+    tp[T_ARMED]=0;
+    i+=1;
+  );
+);
+
+function all_start() local(i tp) (
+  g_grid_pos=0; g_grid_cycle=0;
+  i=0; loop(g_nch, tp=trk(i);
+    tp[T_LEN]>0 ? (
+      tp[T_STATE]=S_PLAY; tp[T_POS]=0;
+      tp[T_SYNC]!=SY_FREE ? tp[T_ANCHOR]=0;
+      tp[T_PLAYTGT]=1; tp[T_RECTGT]=0;
+    );
+    i+=1;
+  );
+);
+
+function advance_grid() local(i tp running) (
+  running = 0;
+  i=0; loop(g_nch, tp=trk(i);
+    (tp[T_STATE]==S_REC || tp[T_STATE]==S_OVERDUB || tp[T_STATE]==S_PLAY || tp[T_ARMED]) ? running=1;
+    i+=1;
+  );
+  (g_grid_len > 0 && running) ? (
+    g_grid_pos += 1;
+    g_grid_pos >= g_grid_len ? (
+      g_grid_pos = 0; g_grid_cycle += 1;
+      i=0; loop(g_nch, tp=trk(i); (tp[T_ARMED] && tp[T_QMODE]==Q_BAR) ? fire_armed(i); i+=1;);
+    );
+    (g_grid_pos % g_beat) == 0 ? (
+      i=0; loop(g_nch, tp=trk(i); (tp[T_ARMED] && tp[T_QMODE]==Q_BEAT) ? fire_armed(i); i+=1;);
+    );
+  ) : !running ? ( g_grid_pos=0; g_grid_cycle=0; );
+);
+
+function onmsg(m2) local(i tp done) (
+  done = 0;
+  (m2 >= 21 && m2 <= 28) ? ( rl_action(m2-20); done=1; );
+  !done ? (
+    i=0; loop(g_nch, tp=trk(i);
+      !done ? (
+        m2==tp[T_NREC]   ? ( press_rec(i);  done=1; ) :
+        m2==tp[T_NSTOP]  ? ( press_stop(i); done=1; ) :
+        m2==tp[T_NSEL]   ? ( g_sel=i; done=1; ) :
+        m2==tp[T_NCLEAR] ? ( clear_trk(i); g_sel=i; done=1; ) :
+        m2==tp[T_NMUTE]  ? ( tp[T_MUTE]=!tp[T_MUTE]; done=1; ) :
+        m2==tp[T_NSOLO]  ? ( tp[T_SOLO]=!tp[T_SOLO]; done=1; );
+      );
+      i+=1;
+    );
+  );
+);
+
+// staged per-sample pipeline for one track; returns its output sample
+function track_process(i, in) local(tp st recg playg contrib wi bar out) (
+  tp = trk(i);
+  st = tp[T_STATE];
+  (st==S_EMPTY && !tp[T_ARMED]) ? ( out = 0; ) : (
+    tp[T_RECENV]  = approach(tp[T_RECENV],  tp[T_RECTGT],  g_s_recin, g_s_recout);
+    tp[T_PLAYENV] = approach(tp[T_PLAYENV], tp[T_PLAYTGT], g_s_play,  g_s_play);
+    recg  = eqpow(tp[T_RECENV]);
+    playg = eqpow(tp[T_PLAYENV]);
+    contrib = 0;
+    st==S_REC ? (
+      wi = tp[T_MEASCNT];
+      wi < g_maxlen ? tp[T_BUF][wi] = in * recg;
+      tp[T_MEASCNT] += 1;
+      tp[T_FIXLEN] > 0 ? (
+        bar = (tp[T_MEAS]==M_SYNCED && g_grid_len>0) ? g_grid_len : g_bar;
+        tp[T_MEASCNT] >= tp[T_FIXLEN]*bar ? close_record(i);
+      );
+    ) : st==S_OVERDUB ? (
+      tp[T_LEN] > 0 ? (
+        tp[T_BUF][tp[T_POS]] = tp[T_BUF][tp[T_POS]]*g_overdub_fb + in*recg;
+        contrib = tp[T_BUF][tp[T_POS]] * playg * tp[T_GAIN];
+        advance_pos(tp);
+      );
+    ) : st==S_PLAY ? (
+      tp[T_LEN] > 0 ? ( contrib = tp[T_BUF][tp[T_POS]] * playg * tp[T_GAIN]; advance_pos(tp); );
+    ) : st==S_STOP ? (
+      (tp[T_LEN] > 0 && tp[T_PLAYENV] > 0.0001) ? ( contrib = tp[T_BUF][tp[T_POS]] * playg * tp[T_GAIN]; advance_pos(tp); );
+    );
+    out = g_any_solo ? (tp[T_SOLO] ? contrib : 0) : (tp[T_MUTE] ? 0 : contrib);
+  );
+  out;
+);
+
+// ---- one-time setup ---------------------------------------------------------
+ext_noinit==0 ? (
+  ext_noinit=1;
+  ext_nodenorm=1;
+  g_top = 16;
+  mem_tracks = g_top; g_top += g_nch*T_NUM;
+  mem_led = g_top; g_top += 8;
+  mem_sysex = g_top; g_top += 9;
+  g_maxlen = ((__memtop() - g_top - 64) / g_nch)|0;
+
+  // per-track buffers + defaults + Launchpad ROWS=tracks note map (rows 8..3)
+  ti=0;
+  loop(g_nch,
+    tp = trk(ti);
+    tp[T_BUF] = g_top; g_top += g_maxlen;
+    tp[T_STATE]=S_EMPTY; tp[T_LEN]=0; tp[T_POS]=0;
+    tp[T_SYNC]=SY_MEAS; tp[T_BARS]=0; tp[T_FIXLEN]=0; tp[T_QMODE]=Q_BAR;
+    tp[T_GAIN]=1.0; tp[T_MUTE]=0; tp[T_SOLO]=0; tp[T_ANCHOR]=0;
+    tp[T_RECENV]=0; tp[T_PLAYENV]=0; tp[T_RECTGT]=0; tp[T_PLAYTGT]=0;
+    tp[T_MEAS]=0; tp[T_MEASCNT]=0; tp[T_ARMED]=0;
+    ti < 6 ? (
+      r = 8 - ti;
+      tp[T_NREC]=r*10+1; tp[T_NSTOP]=r*10+2; tp[T_NCLEAR]=r*10+3;
+      tp[T_NSOLO]=r*10+6; tp[T_NMUTE]=r*10+7; tp[T_NSEL]=r*10+8;
+    ) : (
+      tp[T_NREC]=128; tp[T_NSTOP]=128; tp[T_NCLEAR]=128;
+      tp[T_NSOLO]=128; tp[T_NMUTE]=128; tp[T_NSEL]=128;
+    );
+    ti += 1;
+  );
+
+  g_grid_len=0; g_grid_pos=0; g_grid_cycle=0;
+  g_sel=-1;
+  g_any_solo=0;
+
+  mem_sysex[0]=0xF0; mem_sysex[1]=0x00; mem_sysex[2]=0x20; mem_sysex[3]=0x29;
+  mem_sysex[4]=0x02; mem_sysex[5]=0x0E; mem_sysex[6]=0x0E; mem_sysex[7]=0x01; mem_sysex[8]=0xF7;
+  memset(mem_led, -1, 8);
+);
+
+g_led_phase = 0;   // re-enter Programmer mode after each (re)load
+
+@slider
+(g_slider_action|0) > 0 ? ( rl_action(g_slider_action|0); g_slider_action = 0; );
+recalc_slopes();
+
+@serialize
+function persist() local(i tp) (
+  i=0; loop(g_nch, tp=trk(i);
+    file_var(0, tp[T_SYNC]);
+    file_var(0, tp[T_QMODE]);
+    file_var(0, tp[T_FIXLEN]);
+    file_var(0, tp[T_GAIN]);
+    i+=1;
+  );
+  file_avail(0) >= 0 ? (   // reading: audio buffers aren't persisted -> tracks start empty
+    i=0; loop(g_nch, tp=trk(i);
+      tp[T_STATE]=S_EMPTY; tp[T_LEN]=0; tp[T_POS]=0; tp[T_BARS]=0; tp[T_ANCHOR]=0;
+      tp[T_MEAS]=0; tp[T_MEASCNT]=0; tp[T_ARMED]=0;
+      i+=1;
+    );
+    g_grid_len=0; g_grid_pos=0; g_grid_cycle=0;
+  );
+);
+persist();
+
+@block
+g_bar  = floor(srate * ts_num * 4 / ts_denom * 60 / tempo);
+g_beat = max((g_bar / ts_num)|0, 1);
+
+// --- MIDI in (control): normalize CC/PC into the note space, dispatch ---
+// Note-on -> m2 (0..127); CC -> m2+129; PC -> m2+258 (unified learnable key).
+// Act only on non-zero velocity/value so a note-off / CC release doesn't retrigger.
+while (midirecv(g_mo, g_m1, g_m2, g_m3)) (
+  g_ms = g_m1 & 0xF0;
+  g_ms == 0xB0 ? ( g_m2 += 129; ) :
+  g_ms == 0xC0 ? ( g_m2 += 258; g_m3 = 127; );
+  ((g_ms == 0x90 || g_ms == 0xB0 || g_ms == 0xC0) && g_m3 != 0) ? onmsg(g_m2);
+);
+
+// --- solo mask + arm-bridge gmem publish ---
+g_any_solo = 0; g_wantmask = 0;
+g_bi = 0;
+loop(g_nch,
+  g_btp = trk(g_bi);
+  (g_btp[T_SOLO] && (g_btp[T_LEN]>0 || g_btp[T_STATE]==S_REC || g_btp[T_STATE]==S_OVERDUB)) ? g_any_solo = 1;
+  (g_btp[T_ARMED] || g_btp[T_STATE]==S_REC || g_btp[T_STATE]==S_OVERDUB) ? g_wantmask |= (1<<g_bi);
+  g_bi += 1;
+);
+gmem[0] += 1; gmem[1] = g_wantmask; gmem[2] = g_nch;
+
+// --- minimal LED: Programmer mode + per-track col1 state color (send-on-change) ---
+g_led_phase == 0 ? (
+  midisend_buf(0, mem_sysex, 9);
+  g_led_phase = 1;
+) : (
+  g_bi = 0;
+  loop(min(g_nch,6),
+    g_btp = trk(g_bi);
+    g_bst = g_btp[T_STATE];
+    g_btp[T_ARMED] ? ( g_bcol=C_RED; g_bch=1; ) :
+    g_bst==S_REC ? ( g_bcol=C_RED; g_bch=1; ) :
+    g_bst==S_OVERDUB ? ( g_bcol=C_AMBER; g_bch=0; ) :
+    g_bst==S_PLAY ? ( g_bcol=C_GREEN; g_bch=0; ) :
+    g_bst==S_STOP ? ( g_bcol=C_DIM; g_bch=0; ) :
+    ( g_bcol=C_OFF; g_bch=0; );
+    g_bcode = g_bcol*2 + g_bch;
+    mem_led[g_bi] != g_bcode ? (
+      mem_led[g_bi] = g_bcode;
+      midisend(0, 0x90 + g_bch, (8-g_bi)*10 + 1, g_bcol);
+    );
+    g_bi += 1;
+  );
+);
+
+@sample
+advance_grid();
+g_si = 0;
+loop(g_nch,
+  spl(g_si) = track_process(g_si, spl(g_si));
+  g_si += 1;
+);
+
+@gfx 300 120
+gfx_clear = 0;
+gfx_set(0.9,0.9,0.9);
+gfx_x=6; gfx_y=6;
+gfx_drawstr("RiftwayLabsLooper NG");
+g_gi=0;
+loop(min(g_nch,6),
+  g_gtp = trk(g_gi);
+  gfx_x=6; gfx_y=24 + g_gi*14;
+  g_gi==g_sel ? gfx_set(0.9,0.8,0.4) : gfx_set(0.6,0.6,0.7);
+  gfx_printf("T%d  st=%d  len=%d  bars=%d  gain=%.2f",
+    g_gi+1, g_gtp[T_STATE], g_gtp[T_LEN], g_gtp[T_BARS], g_gtp[T_GAIN]);
+  g_gi+=1;
+);

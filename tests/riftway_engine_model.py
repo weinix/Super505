@@ -104,6 +104,10 @@ class Engine:
         self.grid_len = 0        # base measure in samples (0 until established)
         self.grid_pos = 0
         self.grid_cycle = 0
+        # v1: additive overdub, no decay. This parameter is reserved (future-safe):
+        # 1.0 = pure additive layering; <1.0 would decay older layers (RC-505 feedback).
+        # NOT exposed as a control in v1; the one-multiply hook is all that is wired.
+        self.overdub_feedback = 1.0
         self._s_rec_in = _slope(srate, REC_FADE_IN_S)
         self._s_rec_out = _slope(srate, REC_FADE_OUT_S)
         self._s_play = _slope(srate, PLAY_FADE_S)
@@ -396,7 +400,8 @@ class Engine:
                     self._close_record(i)
         elif t.state == OVERDUB:
             if t.length > 0:
-                t.buf[t.pos] = t.buf[t.pos] + x * rec_g   # accumulate onto own loop
+                # overdub_feedback=1.0 -> pure additive layering (v1 default)
+                t.buf[t.pos] = t.buf[t.pos] * self.overdub_feedback + x * rec_g
                 contrib = t.buf[t.pos] * play_g * t.gain
                 self._advance_pos(t)
         elif t.state == PLAY:
