@@ -6,7 +6,7 @@ been implemented yet.
 
 ## Design principle
 
-The **Super505 JSFX is the single source of truth** for loop state, so it is also
+The **RiftwayLabsLooper JSFX is the single source of truth** for loop state, so it is also
 the natural place to generate LED feedback. This avoids a fragile ReaScript
 polling loop and needs **zero extra Reaper extensions** (none are installed).
 
@@ -19,9 +19,9 @@ polling loop and needs **zero extra Reaper extensions** (none are installed).
                       │  audio
                       ▼
         ┌─────────────────────────────┐
-        │  Track: "Super505 Looper"   │
+        │  Track: "RiftwayLabsLooper Looper"   │
         │   • input FX (optional)     │
-        │   • Super505 JSFX (engine)  │
+        │   • RiftwayLabsLooper JSFX (engine)  │
         └─────────────────────────────┘
               │ audio out        ▲ MIDI in (pad presses, ch1)
               ▼                  │
@@ -40,14 +40,14 @@ Key points:
 - The Launchpad port is **also enabled for "control"** in Reaper MIDI prefs so the
   **utility-row** pad notes can fire Reaper actions (undo/save/etc.) via MIDI-learn,
   independent of the track. (A device can be both a control input and a track input.)
-- Super505 **drops Super8's pass-through echo** so only deliberate LED data leaves
+- RiftwayLabsLooper **drops Super8's pass-through echo** so only deliberate LED data leaves
   the track MIDI output.
 
 ## What gets built (resume order)
 
-### 1. Super505 JSFX (fork of Super8) — *additive*
+### 1. RiftwayLabsLooper JSFX (fork of Super8) — *additive*
 - Copy `~/.config/REAPER/Effects/loopsamplers/super8` →
-  `~/.config/REAPER/Effects/loopsamplers/super505` (back up nothing destructive;
+  `~/.config/REAPER/Effects/loopsamplers/RiftwayLabsLooper` (back up nothing destructive;
   original stays). New `desc:` so it shows as a distinct plugin.
 - **Note remap** to Launchpad Programmer-mode pads (see
   [04-launchpad-promk3-reference.md](04-launchpad-promk3-reference.md)):
@@ -65,16 +65,16 @@ Key points:
 - (Post-MVP) optional per-channel mute & volume.
 
 ### 2. Reaper project template — *additive*
-- New `ProjectTemplates/Super505.RPP` (and a copy in this repo).
+- New `ProjectTemplates/RiftwayLabsLooper.RPP` (and a copy in this repo).
 - Tracks: **Audio In** (UR22C, record-armed, input monitoring, low latency) →
-  **Super505 Looper** (JSFX + routing above) → optional **FX chain** →
+  **RiftwayLabsLooper Looper** (JSFX + routing above) → optional **FX chain** →
   optional **master limiter**.
 - Click routed so it can go to headphones only (separate hardware out) if desired.
 - Launchpad MIDI input enabled; looper track HW MIDI out set to Launchpad.
 
 ### 3. Launchpad ⇄ action mapping
 - **Track rows (1–6):** handled entirely by the JSFX note map — pads talk straight
-  to Super505. No Reaper action binding needed.
+  to RiftwayLabsLooper. No Reaper action binding needed.
 - **Utility row (Row 8, pads 11–18):** bound to Reaper actions via MIDI-learn
   (stored in `reaper-kb.ini`, backed up first):
   - All Start/Stop → could also be the JSFX `play all`; or a Reaper transport action
@@ -87,7 +87,7 @@ Key points:
   via raw MIDI-learn is awkward without js_ReaScriptAPI).
 
 ### 4. LED for utility/static pads
-- Painted by the Super505 JSFX on init (static colors), so the utility row has
+- Painted by the RiftwayLabsLooper JSFX on init (static colors), so the utility row has
   clear, consistent colors with no extra moving parts.
 
 ### 5. Optional helper scripts
@@ -107,6 +107,6 @@ FX, phrase-memory scenes, backing-track clips, Godin MIDI-guitar routing.
 - Exact Launchpad palette indices (colors).
 - Programmer-mode sysex round-trip from inside a JSFX (`midisend_str`).
 - LED update rate / no MIDI flooding (send-on-change required).
-- DrivenByMoss vs Super505 port ownership (decision pending).
+- DrivenByMoss vs RiftwayLabsLooper port ownership (decision pending).
 - Whether Reaper is on ALSA or JACK MIDI today (affects port names).
 - Latency/monitoring config on the UR22C under PipeWire.

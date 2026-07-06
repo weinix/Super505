@@ -1,4 +1,4 @@
-"""V1 independent-track-length tests for the Super505 loop-sync engine.
+"""V1 independent-track-length tests for the RiftwayLabsLooper loop-sync engine.
 
 Scenario from the spec, at 120 BPM (48 kHz, 4/4 -> 1 bar = 96000 samples):
   - Track 1 records a 1-bar loop and immediately loops every bar.
@@ -6,12 +6,12 @@ Scenario from the spec, at 120 BPM (48 kHz, 4/4 -> 1 bar = 96000 samples):
   - Track 1 loops 8x while track 2 loops 1x; both re-align at bar 1 after 8 bars.
   - AllStop/AllStart preserves each track's own loop length.
 
-These run against tests/s505_model.py, a sample-accurate mirror of the JSFX
-engine arithmetic in reaper/effects/super505.
+These run against tests/riftwaylabs_looper_model.py, a sample-accurate mirror of the JSFX
+engine arithmetic in reaper/effects/RiftwayLabsLooper.
 """
 import pytest
 
-from s505_model import Engine, FREE, MEASURE_SYNC, MASTER_SYNC, Q_BEAT
+from riftwaylabs_looper_model import Engine, FREE, MEASURE_SYNC, MASTER_SYNC, Q_BEAT
 
 SR = 48000
 BAR = 96000          # 1 bar @ 120 BPM, 4/4, 48 kHz
@@ -260,7 +260,7 @@ class TestQuantize:
 
 
 class TestArmBridgeMask:
-    """gmem[1] protocol for super505_arm_bridge.lua: a channel's bit is set
+    """gmem[1] protocol for RiftwayLabsLooper_arm_bridge.lua: a channel's bit is set
     exactly while it wants live input (armed / recording / overdubbing)."""
 
     def test_mask_follows_the_record_lifecycle(self):

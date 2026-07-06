@@ -19,7 +19,7 @@ Verified on `bmini` (Reaper 7.72, PipeWire/JACK, Launchpad Pro MK3 on `hw:3,0,0`
   stopped-with-content=dim/blue, empty=off; count-in=amber flash)
 - Static function-row colors (stop=green, clear=amber, reverse=blue, select=white,
   utility=dim)
-- Full **audio path**: source → Super505 loops → mixdown → master
+- Full **audio path**: source → RiftwayLabsLooper loops → mixdown → master
 - **Count-in** feature (clicks N beats at project tempo, then records)
 - **Low latency** (~5 ms)
 
@@ -33,18 +33,18 @@ local), UR22C integration.
 
 | Artifact | Location (live) | Repo copy | Purpose |
 |---|---|---|---|
-| **`super505`** JSFX | `~/.config/REAPER/Effects/loopsamplers/super505` | `reaper/effects/super505` | Forked looper engine (see §3) |
-| **`super505_mixdown`** JSFX | `…/loopsamplers/super505_mixdown` | `reaper/effects/super505_mixdown` | Folds loop output ch1–8 → stereo 1/2 (8 in/out pins) |
+| **`RiftwayLabsLooper`** JSFX | `~/.config/REAPER/Effects/loopsamplers/RiftwayLabsLooper` | `reaper/effects/RiftwayLabsLooper` | Forked looper engine (see §3) |
+| **`RiftwayLabsLooper_mixdown`** JSFX | `…/loopsamplers/RiftwayLabsLooper_mixdown` | `reaper/effects/RiftwayLabsLooper_mixdown` | Folds loop output ch1–8 → stereo 1/2 (8 in/out pins) |
 | `lp_programmer.sh` | — | `tools/lp_programmer.sh` | Launchpad bring-up/reset via `amidi` (programmer/live mode, paint, palette ramp) |
 | `route_guitar.sh` | — | `tools/route_guitar.sh` | Wire E-SP1 guitar → Reaper inputs over PipeWire (run after reboot/replug) |
-| low-latency conf | `~/.config/pipewire/pipewire.conf.d/99-super505-lowlatency.conf` | `reaper/99-super505-lowlatency.conf` | PipeWire quantum 256 (~5 ms) |
+| low-latency conf | `~/.config/pipewire/pipewire.conf.d/99-RiftwayLabsLooper-lowlatency.conf` | `reaper/99-RiftwayLabsLooper-lowlatency.conf` | PipeWire quantum 256 (~5 ms) |
 
 Git: committed locally as `e50866e` on `main`; **not pushed** (push needs the
 remote switched HTTPS→SSH and user approval — SSH auth works as `weinix`).
 
 ---
 
-## 3. super505 JSFX — changes vs factory super8
+## 3. RiftwayLabsLooper JSFX — changes vs factory super8
 
 1. **Note remap** to Launchpad Programmer-mode pads (channel 1):
    note1 Rec/OD/Play = 81–85, note2 Stop = 71–75, note3 Select = 31–35,
@@ -61,7 +61,7 @@ remote switched HTTPS→SSH and user approval — SSH auth works as `weinix`).
    in the top bar (cycles 0–8). Pressing Rec on an *empty* column with count-in > 0
    clicks N beats at project tempo (pad flashes amber), then starts recording on
    the downbeat via `setstate_for_rec`. A second press cancels. Off by default.
-6. GUI title → "Super505".
+6. GUI title → "RiftwayLabsLooper".
 
 ---
 
@@ -70,22 +70,22 @@ remote switched HTTPS→SSH and user approval — SSH auth works as `weinix`).
 Super8/505 records/plays **each loop on its own channel** (loop N ↔ channel N).
 This is the crux of everything:
 
-- **Input** — feed each loop channel its source via **sends** into the Super505
+- **Input** — feed each loop channel its source via **sends** into the RiftwayLabsLooper
   track (which is set to **8 track channels**):
   - *Single-source* (current guitar test): one "Mic In" track → 3 stereo sends to
     dest **1/2, 3/4, 5/6** → all 5 columns record the same source.
   - *Multi-instrument* (planned, §6): each source track → **one** channel.
-- **Output** — `super505_mixdown` (inserted **after** super505) sums ch1–8 → stereo,
+- **Output** — `RiftwayLabsLooper_mixdown` (inserted **after** RiftwayLabsLooper) sums ch1–8 → stereo,
   so every loop reaches the master.
-- **Monitoring** — keep **Super505 channel monitoring OFF** (right-click the channel
+- **Monitoring** — keep **RiftwayLabsLooper channel monitoring OFF** (right-click the channel
   speaker icons) and monitor live sound via the **source tracks**. Otherwise the
-  live signal is heard twice (source-track monitor + Super505 monitor) ≈ +6 dB,
+  live signal is heard twice (source-track monitor + RiftwayLabsLooper monitor) ≈ +6 dB,
   making live louder than replay.
 
 Signal in one line:
 ```
-source(s) → send(s) → Super505 [loops, per channel] → super505_mixdown [→stereo] → master
-Launchpad ⇄ Super505  (pad presses in / LED note-ons out, both on LPProMK3 MIDI)
+source(s) → send(s) → RiftwayLabsLooper [loops, per channel] → RiftwayLabsLooper_mixdown [→stereo] → master
+Launchpad ⇄ RiftwayLabsLooper  (pad presses in / LED note-ons out, both on LPProMK3 MIDI)
 ```
 
 ---
@@ -102,7 +102,7 @@ Gotchas:
 - A JSFX runs `@block`/`@sample` **only while its track is processing** → the
   looper track must be **record-armed + input-monitoring ON** (or transport playing).
   Otherwise no MIDI/LEDs go out and the Launchpad shows its own idle animation.
-- **Reload after editing a `.jsfx`** = remove/re-add the FX (the "Super505" title and
+- **Reload after editing a `.jsfx`** = remove/re-add the FX (the "RiftwayLabsLooper" title and
   the new top-bar button confirm new code is live). Reaper indexes JSFX at startup;
   a brand-new JS file may need the Add-FX browser reopened (or a restart).
 - **LED note-ons in the same block as the programmer-mode sysex get dropped** (device
@@ -122,7 +122,7 @@ Gotchas:
 
 Goal: dedicated instrument per loop column, build a groove-based arrangement.
 ```
-Drum (MT Power Drum Kit + Drum Locker groove) ──► Super505 ch1 ──► column 1
+Drum (MT Power Drum Kit + Drum Locker groove) ──► RiftwayLabsLooper ch1 ──► column 1
 Guitar 1 (E-SP1)                               ──► ch2        ──► column 2
 Guitar 2 (input TBD)                           ──► ch3        ──► column 3
 Mic (Yeti)                                     ──► ch4        ──► column 4
@@ -174,7 +174,7 @@ track's bar count (green) and sync mode (amber).
 
 **Tests**: `tests/test_track_lengths.py` runs the spec scenario (120 BPM: 1-bar
 track loops 8× while the 8-bar track loops once; re-alignment; AllStop/AllStart
-length preservation) against `tests/s505_model.py`, a sample-accurate Python
+length preservation) against `tests/riftwaylabs_looper_model.py`, a sample-accurate Python
 mirror of the engine arithmetic. Keep model and JSFX in sync when editing the
 engine.
 
@@ -185,8 +185,8 @@ next recording; beat-quantized tracks use the free-position engine internally.
 **Arm bridge (2026-07-05).** REAPER only passes live input through record-armed,
 monitored tracks — unarmed source tracks made looper rows record silence. The JSFX
 now publishes a per-channel "wants live input" bitmask (armed / recording /
-count-in) to gmem namespace `Super505` (`[0]` heartbeat, `[1]` mask, `[2]` nchan);
-`reaper/scripts/super505_arm_bridge.lua` (auto-started by `Scripts/__startup.lua`)
+count-in) to gmem namespace `RiftwayLabsLooper` (`[0]` heartbeat, `[1]` mask, `[2]` nchan);
+`reaper/scripts/RiftwayLabsLooper_arm_bridge.lua` (auto-started by `Scripts/__startup.lua`)
 watches it and record-arms whichever tracks *send into* that looper channel — the
 mapping follows the project routing, not track order. One-way: the bridge never
 disarms (disarming would cut live monitoring through the looper). If a flagged
@@ -197,7 +197,7 @@ channel has no feeding send, it prints a console warning naming the missing send
 ## 8. Other open items / candidate next features
 
 - **Per-track volume + mute** — deferred in the original plan; now valuable for
-  balancing 4 instruments. Natural next super505 feature (super8 has per-channel
+  balancing 4 instruments. Natural next RiftwayLabsLooper feature (super8 has per-channel
   monitor/output to build on).
 - **Save the `.rpp` project template** (multi-instrument routing + sync + count-in)
   and add it to the repo — we kept losing the session to crashes; do this early.

@@ -1,27 +1,27 @@
-desc:Super505 RC-505-style looper for Launchpad Pro MK3 (Super8 fork)
+desc:RiftwayLabsLooper (RiftwayLabs) — RC-505-style live looper for Launchpad Pro MK3
+version:1.0
+tags:looper midi sampler
 
 // ===========================================================================
-// Super505 — additive fork of the factory Super8 JSFX (Cockos, LGPL).
-// Changes vs Super8 (see Super505 repo docs):
-//   - Note map remapped to Launchpad Pro MK3 Programmer-mode pads (tracks 1-5).
-//   - Per-track CLEAR added (new st_note5 per channel + chan_clear()).
-//   - LED feedback: Rec/Play pad reflects loop state (red/amber/green/dim/flash).
-//   - Programmer-mode sysex + static utility pads painted on first @block.
-//   - Pass-through MIDI echo dropped (so only LED data leaves the track output).
-//   - v1 INDEPENDENT TRACK LENGTHS (RC-505 style): each track owns its loop
-//     length (samples + bars), playback position, record tempo, sync mode
-//     (FREE / MEASURE_SYNC / MASTER_SYNC, default MEASURE_SYNC) and quantize
-//     mode (off / beat / bar, default bar). The first synced recording defines
-//     the base measure (1 bar); later synced tracks arm at a downbeat and snap
-//     to a whole multiple of it (1-bar drums + 8-bar guitar stay bar-aligned).
-//     FREE tracks run their own position/length off-grid. Action dispatcher
-//     (Launchpad row 2 / "Action trigger" slider): SetCurrentTrackLength
-//     1/2/4/8 bars, sync mode Free/Measure/Master/Toggle.
-// Original super8 is never modified.
+// RiftwayLabsLooper — RC-505-style live looper for Launchpad Pro MK3.
+// (C) 2026 RiftwayLabs. The RiftwayLabsLooper name, GUI, and the RiftwayLabs
+// feature set are (C) RiftwayLabs:
+//   - Launchpad Pro MK3 Programmer-mode pad map + send-on-change LED engine.
+//   - Per-track CLEAR / MUTE / SOLO; per-track INDEPENDENT loop lengths
+//     (samples + bars), playback position, record tempo, sync mode
+//     (FREE / MEASURE_SYNC / MASTER_SYNC, default MEASURE_SYNC), quantize
+//     (off / beat / bar, default bar). First synced recording defines the base
+//     measure; later synced tracks arm at a downbeat and snap to a whole
+//     multiple (1-bar drums + 8-bar guitar stay bar-aligned); FREE tracks run
+//     off-grid. Named action dispatcher (Launchpad row 2 / action slider).
+//   - Arm bridge: publishes per-track want-input state via gmem to a ReaScript.
+//
+// LICENSE / ATTRIBUTION (retained as required by the LGPL — DO NOT REMOVE):
+// The core looper engine is DERIVED FROM the Cockos Super8 JSFX and remains
+// under its license; this file is therefore LGPL. Original notice preserved:
+//   Copyright (C) 2015 and onward Cockos Inc
+//   LICENSE: LGPL v2 or later - http://www.gnu.org/licenses/lgpl.html
 // ===========================================================================
-
-// Copyright (C) 2015 and onward Cockos Inc
-// LICENSE: LGPL v2 or later - http://www.gnu.org/licenses/lgpl.html
 
 // General notes:
 // 8 channels of audio input (1 channel per channel)
@@ -83,7 +83,7 @@ out_pin:click output
 config: nch "Channels" 8 1 2 4 8="8 (namesake)" 12 16 24 32 48
 config: maxmem "Memory Size -preserve-config" 256 64="64MB - max length 0:23 for 8 channels @ 44.1kHz" 128="128MB - max length 0:47 for 8 channels @ 44.1kHz" 256="256MB (default) - max length 1:35 for 8 channels @ 44.1kHz" 512="512MB - max length 3:10 for 8 channels @ 44.1kHz" 1024="1GB - max length 6:20 for 8 channels @ 44.1kHz"
 
-options: maxmem=<? printf("%d",maxmem*1024*128); ?> no_meter gfx_idle prealloc=* gmem=Super505
+options: maxmem=<? printf("%d",maxmem*1024*128); ?> no_meter gfx_idle prealloc=* gmem=RiftwayLabs
 
 slider1:g_slider_sync=0<0,2,1{off,project,playback}>-Sync
 slider4:g_slider_click_cnt=0<0,64,1>-Click count/length
@@ -118,17 +118,17 @@ st_peak_in = 10;
 st_rdc = 11; // msec, chX.rdc is samples
 st_div = 12; // subdiv, 1=normal, chX.div is 1/this
 st_fade_size = 13; // fadeout size
-st_note5 = 14; // Super505: per-track CLEAR note
-st_note6 = 15; // Super505: UNDO note  (Phase 1 stub)
-st_note7 = 16; // Super505: FX note    (Phase 1 stub)
-st_note8 = 17; // Super505: SOLO note
-st_note9 = 18; // Super505: MUTE note
-st_mute  = 19; // Super505: 0/1 output mute gate (PERSIST)
-st_solo  = 20; // Super505: 0/1 solo (transient, not persisted)
-st_fx    = 21; // Super505: 0/1 FX toggle (transient stub)
-st_mult   = 22; // Super505 loop-sync: base-measures this loop spans (>=1; 0=free/unset) (PERSIST)
-st_anchor = 23; // Super505 loop-sync: g_cycle captured at record-start downbeat (PERSIST)
-// Super505 v1 independent-track-length state:
+st_note5 = 14; // RiftwayLabsLooper: per-track CLEAR note
+st_note6 = 15; // RiftwayLabsLooper: UNDO note  (Phase 1 stub)
+st_note7 = 16; // RiftwayLabsLooper: FX note    (Phase 1 stub)
+st_note8 = 17; // RiftwayLabsLooper: SOLO note
+st_note9 = 18; // RiftwayLabsLooper: MUTE note
+st_mute  = 19; // RiftwayLabsLooper: 0/1 output mute gate (PERSIST)
+st_solo  = 20; // RiftwayLabsLooper: 0/1 solo (transient, not persisted)
+st_fx    = 21; // RiftwayLabsLooper: 0/1 FX toggle (transient stub)
+st_mult   = 22; // RiftwayLabsLooper loop-sync: base-measures this loop spans (>=1; 0=free/unset) (PERSIST)
+st_anchor = 23; // RiftwayLabsLooper loop-sync: g_cycle captured at record-start downbeat (PERSIST)
+// RiftwayLabsLooper v1 independent-track-length state:
 st_sync    = 24; // sync mode: 0=FREE 1=MEASURE_SYNC(default) 2=MASTER_SYNC (PERSIST)
 st_qmode   = 25; // quantize: 0=off 1=beat 2=bar(default) for start/stop/rec-close (PERSIST)
 st_fixlen  = 26; // preset loop length in bars (0=measure freely); auto-closes rec (PERSIST)
@@ -145,7 +145,7 @@ function track_len(rec) (
   g_length > 0 ? max(floor(g_length/rec[st_div]+0.5),1) : 0;
 );
 
-// Super505 LED palette indices (Launchpad Pro MK3 Programmer mode, velocity =
+// RiftwayLabsLooper LED palette indices (Launchpad Pro MK3 Programmer mode, velocity =
 // color). Verify/tweak with tools/lp_programmer.sh ramp; one line each.
 C_OFF   = 0;   // empty
 C_RED   = 5;   // recording
@@ -154,7 +154,7 @@ C_GREEN = 21;  // playing
 C_DIM   = 45;  // stopped with content
 C_WHITE = 3;   // select tint / status pulse peak (static)
 C_UTIL  = 1;   // utility row (static, dim)
-// Super505 v2 per-track button colors (Programmer-mode palette indices; tweak w/ ramp)
+// RiftwayLabsLooper v2 per-track button colors (Programmer-mode palette indices; tweak w/ ramp)
 C_YELLOW    = 13;  // SOLO active
 C_BLUE      = 67;  // MUTE active
 C_PURPLE    = 49;  // FX active
@@ -167,7 +167,7 @@ function recalc_fades() (
   g_slope_recout = -1/(srate * 0.030); // fade length for ending rec
   g_slope_playin = 1/(srate * 0.050); // fade length for starting playback
   g_slope_playout = -1/(srate * 0.050); // fade length for ending playback
-  g_mutespeed = exp(-1/(srate * 0.005)); // Super505: ~5ms mute/solo gate ramp
+  g_mutespeed = exp(-1/(srate * 0.005)); // RiftwayLabsLooper: ~5ms mute/solo gate ramp
 );
 
 recalc_fades();
@@ -193,8 +193,8 @@ function init(x, n1,n2,n3,n4,n5,n6,n7,n8,n9)
   idx = x;
   fpos_slope = monvol = fpos = fpos2 = fpos2_slope = 0;
   dirty_top = -1;
-  mgate = 1; // Super505: output gate starts open (un-muted)
-  meas_state = meas_samples = 0; // Super505 loop-sync: not measuring a length yet
+  mgate = 1; // RiftwayLabsLooper: output gate starts open (un-muted)
+  meas_state = meas_samples = 0; // RiftwayLabsLooper loop-sync: not measuring a length yet
   buf = alloc(g_maxlen);
 
   rec = mem_stlist + x*st_num;
@@ -255,7 +255,7 @@ function process_need_zero(p1, p2) global()
 
 function setstate(st) instance(fpos_slope, fpos2_slope, rec) local(dt l)
 (
-  // Super505 loop-sync: finalize loop length when leaving the record state.
+  // RiftwayLabsLooper loop-sync: finalize loop length when leaving the record state.
   st != 2 ? (
     this.meas_state == 1 ? (
       // subsequent synced track: snap the measured length to a whole multiple of
@@ -439,7 +439,7 @@ function process(s)
   );
   peak_in = max(abs(s),peak_in);
 
-  // --- Super505 independent-track-length model ---
+  // --- RiftwayLabsLooper independent-track-length model ---
   // l_length is this track's own loop length (base measure for synced tracks
   // while recording; mult*g_length or st_len when set). l_pos is the per-channel
   // buffer index: synced mult>1 loops span [0, mult*g_length) across base cycles,
@@ -504,7 +504,7 @@ function process(s)
   this.need_zero > 0 ? this.process_need_zero(l_offs+wrpos,l_offs+l_pos);
   
   r = this.rev_state!==0 ? this.process_rev(buf)*sc : sc > 0.0001 ? buf[l_pos]*sc;
-  // Super505: ramp the per-track MUTE/SOLO gate (~5ms) and apply to loop playback only
+  // RiftwayLabsLooper: ramp the per-track MUTE/SOLO gate (~5ms) and apply to loop playback only
   // (live monitor s*monvol is left ungated, matching RC-505 mute semantics).
   mgate += (mgate_t - mgate) * (1 - g_mutespeed);
   r *= mgate;
@@ -551,7 +551,7 @@ function reverse() instance(rec) local(l)
   rec[st_lastd] = -1;
 );
 
-// Super505: erase ONLY this channel's loop (RC-505 per-track Clear).
+// RiftwayLabsLooper: erase ONLY this channel's loop (RC-505 per-track Clear).
 // Mirrors reset() for a single channel but leaves g_length/g_pos and the other
 // channels untouched, so the rest of the loop keeps playing.
 function chan_clear() instance(rec dirty_top idx)
@@ -583,32 +583,32 @@ function onmsg(m1,m2,m3) instance(rec,note,note2,note3,note4)
    (m2 == note && (m2 != note2 || rec[st_state]==0)) || m2 == 1024+rec+st_note1 ? (
      newstate = (rec[st_state] == 2 && g_was_firstrec==0) ? 1 : 2;
    ) : m2 == note2  || m2 == 1024+rec+st_note2 ? (
-     // Super505: a stopped FREE track has its own length even when no grid exists
+     // RiftwayLabsLooper: a stopped FREE track has its own length even when no grid exists
      newstate = rec[st_state] == 2 || (rec[st_state]==0 && (g_length || rec[st_len])) ? 1 : 0
    ) : m2 == note3 ? (
      g_chan_selected = (g_chan_selected == this.idx) ? -1 : this.idx;
    ) : m2 == note4 || m2 == 1024+rec+st_note4 ? (
      this.reverse();
-   ) : m2 == rec[st_note5] ? (        // Super505: per-track Clear
+   ) : m2 == rec[st_note5] ? (        // RiftwayLabsLooper: per-track Clear
      this.chan_clear();
-   ) : m2 == rec[st_note8] ? (        // Super505: SOLO toggle
+   ) : m2 == rec[st_note8] ? (        // RiftwayLabsLooper: SOLO toggle
      rec[st_solo] = !rec[st_solo];
-   ) : m2 == rec[st_note9] ? (        // Super505: MUTE toggle
+   ) : m2 == rec[st_note9] ? (        // RiftwayLabsLooper: MUTE toggle
      rec[st_mute] = !rec[st_mute];
-   ) : m2 == rec[st_note7] ? (        // Super505: FX toggle (Phase 1 stub: LED only)
+   ) : m2 == rec[st_note7] ? (        // RiftwayLabsLooper: FX toggle (Phase 1 stub: LED only)
      rec[st_fx] = !rec[st_fx];
    );
    // note6 UNDO: Phase 1 stub — pad reserved/lit, no action yet (Phase 2 -> chan_undo()).
    newstate >= 0 ? (
-     // Super505 count-in: a press on the channel that is counting cancels it
+     // RiftwayLabsLooper count-in: a press on the channel that is counting cancels it
      (g_ci_active && this.idx == g_ci_chan) ? (
        g_ci_active = 0; g_ci_chan = -1;
      ) :
-     // Super505 loop-sync: a press on an armed (waiting-for-downbeat) channel cancels it
+     // RiftwayLabsLooper loop-sync: a press on an armed (waiting-for-downbeat) channel cancels it
      (g_arm_mask & (1<<this.idx)) ? (
        g_arm_mask -= (1<<this.idx);
      ) :
-     // Super505 loop-sync: subsequent track on an existing base grid -> ARM for a
+     // RiftwayLabsLooper loop-sync: subsequent track on an existing base grid -> ARM for a
      // quantized record start (fires at the next base downbeat -- or next beat, if
      // this track quantizes to beats -- in @sample), instead of recording now.
      // FREE tracks and quantize-off tracks skip arming and record immediately,
@@ -678,7 +678,7 @@ function xfadebuf(buf, osz, nsz) local(fsz,s,ds)
  
 );
 
-// ================= Super505 action dispatcher =================
+// ================= RiftwayLabsLooper action dispatcher =================
 // Named actions operate on the CURRENT (selected) track. Triggered from:
 //   - Launchpad row 2 (notes 21..28 -> action ids 1..8)
 //   - the "Action trigger" slider (automation / MIDI-learn / ReaScript)
@@ -800,7 +800,7 @@ function reset() local(lp)
       memset(lp[st_buf], 0, lp[st_dirty]);
       lp[st_dirty] = 0;
     );
-    // Super505: forget per-track loop lengths/phase too (settings survive)
+    // RiftwayLabsLooper: forget per-track loop lengths/phase too (settings survive)
     lp[st_mult]=0; lp[st_anchor]=0; lp[st_len]=0; lp[st_ppos]=0;
     lp += st_num;
   );
@@ -885,14 +885,14 @@ ext_noinit == 0 ? (
   g_length = 0;
   g_pos=0;
   g_firstrec=0;
-  g_cycle=0;      // Super505 loop-sync: current base-measure index (++ on g_pos wrap)
-  g_arm_mask=0;   // Super505 loop-sync: channels armed, waiting for next downbeat to start REC
+  g_cycle=0;      // RiftwayLabsLooper loop-sync: current base-measure index (++ on g_pos wrap)
+  g_arm_mask=0;   // RiftwayLabsLooper loop-sync: channels armed, waiting for next downbeat to start REC
   g_recstart_gate=0;
   g_prevent_processing = 0; // &1=gate, &2=sync mode
   g_chan_selected = -1; // currently selected channel
   g_lastmsg = -1;
 
-  // --- Super505 additions ---
+  // --- RiftwayLabsLooper additions ---
   mem_led_last = alloc(64); // v2: 8 tracks x 8 cols (last LED code per dynamic pad)
   memset(mem_led_last, -1, 64); // -1 forces first send
   mem_led_row2 = alloc(8);  // v1 actions: row-2 pads 21..28 (last LED code)
@@ -903,7 +903,7 @@ ext_noinit == 0 ? (
   mem_sysex_prog[3]=0x29; mem_sysex_prog[4]=0x02; mem_sysex_prog[5]=0x0E;
   mem_sysex_prog[6]=0x0E; mem_sysex_prog[7]=0x01; mem_sysex_prog[8]=0xF7;
 
-  // Super505 v2 Launchpad Pro MK3 pad map (Programmer mode, channel 1): ROWS = tracks.
+  // RiftwayLabsLooper v2 Launchpad Pro MK3 pad map (Programmer mode, channel 1): ROWS = tracks.
   // Track i uses grid row r = 8-i (rows 8,7,6,5,4 for tracks 1..5); note = r*10+col.
   //   col1 REC=r1  col2 STOP=r2  col3 CLEAR=r3  col4 UNDO=r4
   //   col5 FX=r5   col6 SOLO=r6  col7 MUTE=r7   col8 STATUS+SELECT=r8
@@ -923,12 +923,12 @@ ext_noinit == 0 ? (
    ?>
 );
 
-// Super505 LED startup phase — reset every @init so the Launchpad re-enters
+// RiftwayLabsLooper LED startup phase — reset every @init so the Launchpad re-enters
 // Programmer mode after load/reload (0=send sysex, 1=settle, 2=running).
 g_s505_phase = 0;
 g_s505_t = 0;
 
-// Super505 count-in state (reset each @init)
+// RiftwayLabsLooper count-in state (reset each @init)
 g_ci_active = 0;
 g_ci_chan = -1;
 g_ci_samples_left = 0;
@@ -947,7 +947,7 @@ cfgp_sync[] != floor(g_slider_sync+0.5) ? (
   cfgp_clickcnt[] = g_slider_click_cnt|0;
 );
 
-// Super505: fire a named action on the selected track, then self-reset to 0
+// RiftwayLabsLooper: fire a named action on the selected track, then self-reset to 0
 (g_slider_action|0) > 0 ? (
   s505_action(g_slider_action|0);
   g_slider_action = 0;
@@ -999,7 +999,7 @@ function doconf() local(i,s) (
     x+=1;
   );
 
-  // Super505 v2: persist CLEAR + new pad notes and the MUTE gate. st_note5=14 ..
+  // RiftwayLabsLooper v2: persist CLEAR + new pad notes and the MUTE gate. st_note5=14 ..
   // st_note9=18, st_mute=19 are contiguous, so one loop covers all six. SOLO/FX
   // and undo state are intentionally NOT persisted (transient). file_avail guards
   // keep old projects (which lack these) loading cleanly.
@@ -1014,7 +1014,7 @@ function doconf() local(i,s) (
     x+=1;
   );
 
-  // Super505 loop-sync: persist st_mult + st_anchor (contiguous: 22,23). Old
+  // RiftwayLabsLooper loop-sync: persist st_mult + st_anchor (contiguous: 22,23). Old
   // projects lack these -> file_avail guard skips them, keeping back-compat.
   loop(x=0;2,
     file_avail(0) != 0 ? (
@@ -1027,7 +1027,7 @@ function doconf() local(i,s) (
     x+=1;
   );
 
-  // Super505 v1: persist per-track sync mode / quantize mode / fixed-length
+  // RiftwayLabsLooper v1: persist per-track sync mode / quantize mode / fixed-length
   // preset (contiguous: st_sync=24, st_qmode=25, st_fixlen=26). Same
   // file_avail back-compat guard as above.
   loop(x=0;3,
@@ -1042,7 +1042,7 @@ function doconf() local(i,s) (
   );
 
   file_avail(0)>=0 ? ( // is reading config
-    // Super505 v2: re-assert the ROWS=tracks pad layout, overriding any stale
+    // RiftwayLabsLooper v2: re-assert the ROWS=tracks pad layout, overriding any stale
     // note assignments restored from an older (column-layout) project. st_mute
     // is left as read (mute state persists); only the note map is forced.
     <? loop(x=0; nch,
@@ -1090,7 +1090,7 @@ g_prevent_processing &= 0xd;
   g_firstrec=0; 
 );
 
-// Super505: one beat of the base measure ("click cnt" = beats per bar; default 4).
+// RiftwayLabsLooper: one beat of the base measure ("click cnt" = beats per bar; default 4).
 // Used by beat-quantized record starts and beat-snapped loop closes.
 g_bpb = (cfgp_clickcnt[]|0) > 0 ? (cfgp_clickcnt[]|0) : 4;
 g_beatlen = g_length > 0 ? max((g_length/g_bpb)|0,1) : 0;
@@ -1118,7 +1118,7 @@ g_inject_midinote >= 1024 ? (
   nextmsg_3=127;
   g_inject_midinote=0;
 ) : (
-  // Super505: read the next message for processing but DON'T echo it back out —
+  // RiftwayLabsLooper: read the next message for processing but DON'T echo it back out —
   // the track MIDI output is reserved for LED control.
   midirecv(nextmsg_offs,nextmsg_1,nextmsg_2,nextmsg_3);
 );
@@ -1129,7 +1129,7 @@ function onblock()
 (
   rec[st_peak_in] = peak_in;
   peak_in *= g_peak_decay;
-  // Super505: per-track output-gate target. Any solo active -> only soloed tracks
+  // RiftwayLabsLooper: per-track output-gate target. Any solo active -> only soloed tracks
   // sound (mute ignored for them); otherwise mute gates this track.
   mgate_t = g_any_solo ? ((g_solo_mask & (1<<idx)) ? 1 : 0) : (rec[st_mute] ? 0 : 1);
   monmode_sel = monmode >= 2 || is_chan_selected(idx);
@@ -1142,7 +1142,7 @@ function onblock()
   this.rev_state !== 0 ? last_w=-1; // force redraw if reversing this block
 );
 
-// Super505: compute the solo mask once per block, before the per-channel onblock().
+// RiftwayLabsLooper: compute the solo mask once per block, before the per-channel onblock().
 // Same pass also builds the "wants live input" mask (armed for a quantized start,
 // recording/overdubbing, or counting in) published to gmem for the arm bridge.
 g_solo_mask = 0;
@@ -1156,8 +1156,8 @@ loop(g_nchan,
 g_any_solo = g_solo_mask != 0;
 g_ci_active && g_ci_chan >= 0 ? (g_s505_wantmask |= (1<<g_ci_chan));
 
-// --- Super505 arm bridge (gmem protocol, namespace "Super505") ---
-// scripts/super505_arm_bridge.lua watches these and record-arms whichever
+// --- RiftwayLabsLooper arm bridge (gmem protocol, namespace "RiftwayLabs") ---
+// scripts/RiftwayLabsLooper_arm_bridge.lua watches these and record-arms whichever
 // REAPER tracks send into the flagged looper channels.
 //   gmem[0] = heartbeat (increments every block while the FX runs)
 //   gmem[1] = want-input bitmask (bit N = looper channel N+1)
@@ -1175,7 +1175,7 @@ gmem[2] = g_nchan;
 
 i_srate = 1.0/srate;
 
-// ============== Super505 LED feedback (v2: ROWS = tracks) ==================
+// ============== RiftwayLabsLooper LED feedback (v2: ROWS = tracks) ==================
 // Track i -> grid row (8-i); 8 columns per row:
 //   col1 REC/PLAY/OD  col2 STOP  col3 CLEAR  col4 UNDO(stub)
 //   col5 FX(stub)     col6 SOLO  col7 MUTE   col8 STATUS+SELECT
@@ -1308,7 +1308,7 @@ function chan_onmsg(m1,m2,m3)
   );
 
   m2 == cfgp_playall[] || m2 == 1024+cfgp_playall ? play_or_stop_all();
-  // Super505: Launchpad row 2 = action pads (length presets + sync mode)
+  // RiftwayLabsLooper: Launchpad row 2 = action pads (length presets + sync mode)
   m2 >= 21 && m2 <= 28 ? s505_action(m2-20);
   <? loop(x=0;nch, printf("ch%d.onmsg(m1,m2,m3);\n",x+=1)) ?>
 );
@@ -1384,7 +1384,7 @@ while (sidx == nextmsg_offs)
     nextmsg_2 < 1024 ? g_lastmsg = nextmsg_2;
   );
   nextmsg_offs=-1;
-  midirecv(nextmsg_offs,nextmsg_1,nextmsg_2,nextmsg_3); // Super505: no echo (LED output)
+  midirecv(nextmsg_offs,nextmsg_1,nextmsg_2,nextmsg_3); // RiftwayLabsLooper: no echo (LED output)
 );
 
 sidx+=1;
@@ -1401,7 +1401,7 @@ g_pos >= g_length && g_firstrec == 0 ? ( g_pos = 0; g_cycle += 1; ); // loop-syn
 
 <? loop(x=0;nch, printf("spl%d=ch%d.process(spl%d);\n",x,x+1,x);x+=1) ?>
 
-// ---- Super505 count-in: click g_countin beats at project tempo, then record ----
+// ---- RiftwayLabsLooper count-in: click g_countin beats at project tempo, then record ----
 g_ci_active ? (
   g_ci_next_click <= 0 ? (                  // start a new click blip each beat
     g_ci_click_env = 1.0;
@@ -1835,7 +1835,7 @@ function draw(ixpos, ypos) local(i i2 w h gap rec mode force_redraw rowsize
     is_chan_selected(i) ? mode|=8;
     rec[st_dirty] ? mode|=16;
     mode |= rec[st_monmode] << 8;
-    // Super505: fold per-track length/sync state into the redraw hash
+    // RiftwayLabsLooper: fold per-track length/sync state into the redraw hash
     mode |= min(rec[st_mult],63) << 16;
     mode |= rec[st_sync] << 22;
     mode |= min(rec[st_fixlen],15) << 24;
@@ -1852,7 +1852,7 @@ function draw(ixpos, ypos) local(i i2 w h gap rec mode force_redraw rowsize
       gfx_y = ypos + 8;
       gfx_printf("%d",i+1);
 
-      // Super505: per-track loop length + sync mode ("8x M" = 8 bars measure-sync,
+      // RiftwayLabsLooper: per-track loop length + sync mode ("8x M" = 8 bars measure-sync,
       // "free" = own unsnapped length, "(4)" = 4-bar preset armed for next rec)
       w > 60 ? (
         gfx_set(0.75);
@@ -2135,7 +2135,7 @@ function draw_topbar(need_ref) local(s,i,t, lastlen, lastgate, lastlatch, lastcl
   gfx_x=0;
   gfx_y=4;
   t=time_precise();
-  s="Super505";
+  s="RiftwayLabs";
   i=0;
   loop(strlen(s),
     gfx_set(sin(t+i*0.2)*0.3+0.5, cos(t*.61+i*0.5)*.7+0.3, sin(t*2.1-i*0.6)*.3+0.7);
@@ -2305,7 +2305,7 @@ function export()  local(rec, flag, tidx, idx, ster, l)
     !(idx&1) || get_linked_rec(idx)<0 ? (
       ster = get_linked_rec(idx);
       rec[st_state] ? (
-        l = max(track_len(rec),1);   // Super505: export each track at its own loop length
+        l = max(track_len(rec),1);   // RiftwayLabsLooper: export each track at its own loop length
         export_buffer_to_project(rec[st_buf]+((rec[st_mult]==0 && rec[st_len]>0) ? 0 : g_offs%l),l, ster>=0 ? 2 : 1,srate,tidx, flag,
           flag?(cfgp_sync[] ? tempo : estbpm(g_length)),
           ster>=0 ? ster[st_buf] - rec[st_buf] : 0

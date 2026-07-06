@@ -4,7 +4,7 @@
 # pw-link connections are not persistent (PipeWire defaults back to the Yeti).
 #
 # Routes the guitar's capture_FL to BOTH Reaper inputs so a mono guitar still
-# feeds all 5 Super505 loop channels. Reaper must be running.
+# feeds all 5 RiftwayLabsLooper loop channels. Reaper must be running.
 #
 # Usage:  tools/route_guitar.sh         # connect guitar, drop the Yeti
 #         tools/route_guitar.sh --keep  # connect guitar, leave Yeti connected too

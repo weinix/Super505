@@ -1,7 +1,7 @@
 # 02 — Super8 JSFX Analysis
 
 Source: `~/.config/REAPER/Effects/loopsamplers/super8` (factory Cockos JSFX, 1658 lines).
-This is the authoritative teardown the Super505 fork is based on.
+This is the authoritative teardown the RiftwayLabsLooper fork is based on.
 
 ## 1. Pins / I/O
 
@@ -10,7 +10,7 @@ This is the authoritative teardown the Super505 fork is based on.
 - Outputs: `nch` audio outputs + 2 extra:
   - `out_pin: monitor output` (selected-channel monitor)
   - `out_pin: click output` (metronome)
-- For Super505 we use channels **1–5** (5 RC-505 tracks); channels 6–8 unused.
+- For RiftwayLabsLooper we use channels **1–5** (5 RC-505 tracks); channels 6–8 unused.
 
 ## 2. MIDI input model
 
@@ -75,7 +75,7 @@ Computed from the init loop (`ch%d.init`, starting note `a=36`, stride +2 except
 | 8 | 56 | 57 | off | off |
 
 (The gaps — 40,41,48,49,54,55 — match a drum-pad layout for the unassigned
-select/reverse notes.) **Super505 will reassign all of these** to Launchpad
+select/reverse notes.) **RiftwayLabsLooper will reassign all of these** to Launchpad
 Programmer-mode pad notes.
 
 ## 5. Global / utility actions
@@ -109,7 +109,7 @@ Non-MIDI config: `gate` (start-rec gate dB), `fade` (xfade ms), `clickcnt`
 
 These two sliders are the **only state Reaper can read/write** on Super8.
 
-## 7. Hard limitations (why we fork to Super505)
+## 7. Hard limitations (why we fork to RiftwayLabsLooper)
 
 1. **No LED / MIDI feedback output.** It only echoes received MIDI
    (`midirecv ? midisend`). There is no way to reflect loop state on a controller.
@@ -123,9 +123,9 @@ These two sliders are the **only state Reaper can read/write** on Super8.
 6. **Pass-through echo** of incoming MIDI conflicts with repurposing the MIDI
    output for LED control (it would re-light pads with press velocities).
 
-## 8. What Super505 (fork) will change — summary
+## 8. What RiftwayLabsLooper (fork) will change — summary
 
-Additive copy `super505`, original `super8` untouched:
+Additive copy `RiftwayLabsLooper`, original `super8` untouched:
 
 - **Remap notes** to Launchpad Pro MK3 Programmer-mode pad numbers for 5 tracks.
 - **Add per-channel Clear** command (new note per channel).

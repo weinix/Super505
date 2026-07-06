@@ -1,6 +1,6 @@
--- super505_arm_bridge.lua — record-arm source tracks when looper channels want input
+-- RiftwayLabsLooper_arm_bridge.lua — record-arm source tracks when looper channels want input
 --
--- The Super505 JSFX publishes (gmem namespace "Super505"):
+-- The RiftwayLabsLooper JSFX publishes (gmem namespace "RiftwayLabs"):
 --   gmem[0] = heartbeat (increments every audio block while the FX runs)
 --   gmem[1] = want-input bitmask (bit N = looper channel N+1 is armed for a
 --             quantized record start, recording/overdubbing, or counting in)
@@ -17,7 +17,7 @@
 -- Install: run once per session (Actions -> Load ReaScript), or let
 -- Scripts/__startup.lua launch it automatically at REAPER startup.
 
-local NS = "Super505"
+local NS = "RiftwayLabs"
 
 reaper.gmem_attach(NS)
 
@@ -32,7 +32,7 @@ local function find_looper_track()
     local tr = reaper.GetTrack(0, i)
     for fx = 0, reaper.TrackFX_GetCount(tr) - 1 do
       local ok, name = reaper.TrackFX_GetFXName(tr, fx, "")
-      if ok and name:lower():find("super505") and not name:lower():find("mixdown") then
+      if ok and name:lower():find("riftwaylabslooper") and not name:lower():find("mixdown") then
         return tr
       end
     end
@@ -100,7 +100,7 @@ local function tick()
           if (rising & bit) ~= 0 then
             if not arm_sources(ch) and (warned & bit) == 0 then
               warned = warned | bit
-              reaper.ShowConsoleMsg(("super505_arm_bridge: no track sends into looper channel %d - add a send (Track -> Super505 Looper, dest channel %d)\n")
+              reaper.ShowConsoleMsg(("RiftwayLabsLooper_arm_bridge: no track sends into looper channel %d - add a send (Track -> RiftwayLabsLooper, dest channel %d)\n")
                 :format(ch + 1, ch + 1))
             end
           end

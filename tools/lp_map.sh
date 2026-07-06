@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # lp_map.sh — interactively map Launchpad Pro MK3 pads to the MIDI they emit,
-# to verify the Super505 note layout. User-paced: it prompts for each pad,
+# to verify the RiftwayLabsLooper note layout. User-paced: it prompts for each pad,
 # you press that pad once, then hit ENTER, and it prints what the device sent.
 #
 # Reads via ALSA seq (works even while Reaper/PipeWire hold the raw device).
 # Captures BOTH the MIDI port (36:0) and the DAW port (36:2) so we can see
-# which port a pad actually uses and whether the note matches what Super505
+# which port a pad actually uses and whether the note matches what RiftwayLabsLooper
 # expects.
 #
 # Usage: tools/lp_map.sh         # map the Record, Stop, Clear rows (cols 1-5)
@@ -28,7 +28,7 @@ stdbuf -oL aseqdump -p "$P_DAW"  2>/dev/null | grep --line-buffered -viE "Clock|
 trap 'kill $(jobs -p) 2>/dev/null; rm -f "$LOG"' EXIT
 sleep 0.6
 
-# button label | expected Super505 note
+# button label | expected RiftwayLabsLooper note
 ROWS=(
   "Track 1 RECORD (top-left pad)|81"
   "Track 2 RECORD|82"
@@ -54,9 +54,9 @@ if [ "${1:-}" = "all" ]; then
 fi
 
 echo
-echo "=== Super505 Launchpad pad map ==="
+echo "=== RiftwayLabsLooper Launchpad pad map ==="
 echo "Press ONLY the named pad once, then hit ENTER. (Ctrl-C to stop early.)"
-echo "Result columns: PAD = what you pressed | EXPECT = note Super505 wants | GOT = what the device sent"
+echo "Result columns: PAD = what you pressed | EXPECT = note RiftwayLabsLooper wants | GOT = what the device sent"
 echo
 printf "%-34s %-7s %s\n" "PAD" "EXPECT" "GOT"
 printf "%-34s %-7s %s\n" "----------------------------------" "------" "------------------------------"

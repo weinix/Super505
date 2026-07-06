@@ -39,7 +39,7 @@ the **Enya Music XMARI**, a carbon-fiber S-style **smart guitar** whose onboard
 **E-SP1 system** includes a **USB-C audio interface**. Because the guitar *is* the
 audio interface, it removes a whole hardware link from the dev/test loop — plug
 one USB-C cable into the workstation and you have a guitar source for exercising
-the Super505 looper. No DI box, no amp, no separate interface.
+the RiftwayLabsLooper looper. No DI box, no amp, no separate interface.
 
 ### What it is (verified)
 
@@ -104,11 +104,11 @@ the only authoritative source for the unverified items above.
      XMARI's capture node to Reaper in `qpwgraph`/`qjackctl`, output on the UR22C.
    - Set a small block size (e.g. 128–256) and check for x-runs; the
      all-in-USB-guitar path's latency is unknown, so measure it.
-3. On the Super505 input track, set the **record input** to the XMARI's channel(s).
+3. On the RiftwayLabsLooper input track, set the **record input** to the XMARI's channel(s).
    If it presents as **stereo**, record stereo; if **mono**, use a single channel.
 4. Because the E-SP1 DSP already shapes the tone, **leave amp-sim plugins off** the
    input track — pick the guitar's preset (Clean for a flat looping source) instead.
-5. Arm + monitor and play a test loop through Super505 to confirm signal, level,
+5. Arm + monitor and play a test loop through RiftwayLabsLooper to confirm signal, level,
    and acceptable latency before relying on it for a session.
 
 > **Status:** documented from Enya's public materials + research; **not yet
@@ -144,7 +144,7 @@ the only authoritative source for the unverified items above.
 messages to the *virtual MIDI keyboard / control* path — it cannot reliably push
 arbitrary notes or sysex to a *hardware output* like the Launchpad. Driving LEDs
 from a Lua script would require installing `js_ReaScriptAPI`. **We therefore plan
-to generate LED feedback from the forked Super505 JSFX instead** (JSFX `midisend`
+to generate LED feedback from the forked RiftwayLabsLooper JSFX instead** (JSFX `midisend`
 goes out the track's hardware MIDI output with zero extra dependencies).
 
 ## DrivenByMoss — the coexistence conflict
@@ -156,14 +156,14 @@ goes out the track's hardware MIDI output with zero extra dependencies).
   - `MIDI_OUTPUT0 = Midi-Bridge:Launchpad Pro MK3: LPProMK3 MIDI (playback)`
 - DrivenByMoss is a **global control surface** (Reaper-wide, not per-project). It
   grabs the `LPProMK3 MIDI` port and drives the Launchpad in its own modes.
-- **Super505 needs that same port.** A MIDI port can only be owned by one
+- **RiftwayLabsLooper needs that same port.** A MIDI port can only be owned by one
   consumer. They cannot run simultaneously on the same port → pending decision in
   [05-open-decisions.md](05-open-decisions.md).
 
 ## Other connected MIDI gear (for context, from caches)
 
 - Keystation 49 MK3, Impact GX49, Behringer X18/XR18, a "Digital Keyboard",
-  VirMIDI virtual ports, BLE MIDI. None are needed for Super505.
+  VirMIDI virtual ports, BLE MIDI. None are needed for RiftwayLabsLooper.
 
 ## Relevant Reaper directories (for deliverables)
 

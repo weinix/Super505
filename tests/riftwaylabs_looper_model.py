@@ -1,6 +1,6 @@
-"""Sample-accurate Python reference model of the Super505 loop-sync engine.
+"""Sample-accurate Python reference model of the RiftwayLabsLooper loop-sync engine.
 
-This mirrors the arithmetic of reaper/effects/super505 (the JSFX) function by
+This mirrors the arithmetic of reaper/effects/RiftwayLabsLooper (the JSFX) function by
 function so the independent-track-length model can be tested headlessly.
 Audio content is not modeled -- only state, positions and lengths, which is
 what the loop-sync feature is about. Each method notes the JSFX code it

@@ -182,7 +182,7 @@
     MAINSEND 0 0
   >
   <TRACK {CE206BF3-FD5A-4F44-ACB6-F55612A81A17}
-    NAME "Super505 Looper"
+    NAME "RiftwayLabsLooper"
     PEAKCOL 16576
     BEAT -1
     AUTOMODE 0
@@ -211,13 +211,13 @@
       SHOW 0
       LASTSEL 0
       DOCKED 0
-    <JS loopsamplers/super505 ""
+    <JS loopsamplers/RiftwayLabsLooper ""
       0 - - - - - - - -
     >
     FLOATPOS 0 0 0 0
     FXID {D4719848-4FF8-4DB4-912A-0085F316F380}
     WAK 0 0
-    <JS loopsamplers/super505_mixdown ""
+    <JS loopsamplers/RiftwayLabsLooper_mixdown ""
       - - - - - - - -
     >
     FLOATPOS 0 0 0 0

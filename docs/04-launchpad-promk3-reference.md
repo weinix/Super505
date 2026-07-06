@@ -1,4 +1,4 @@
-# 04 — Launchpad Pro MK3 Reference (for Super505)
+# 04 — Launchpad Pro MK3 Reference (for RiftwayLabsLooper)
 
 Reference notes for driving the controller. **To be verified live** once the
 device is connected — values below follow Novation's published Programmer
@@ -11,22 +11,22 @@ ALSA equivalents in parentheses):
 
 | Port | JACK name | ALSA | Use |
 |------|-----------|------|-----|
-| MIDI | `Midi-Bridge:Launchpad Pro MK3: LPProMK3 MIDI` | `hw:MK3` (0,0) | **Super505 surface** (Programmer mode) |
+| MIDI | `Midi-Bridge:Launchpad Pro MK3: LPProMK3 MIDI` | `hw:MK3` (0,0) | **RiftwayLabsLooper surface** (Programmer mode) |
 | DIN  | `Midi-Bridge:Launchpad Pro MK3: LPProMK3 DIN`  | — | physical DIN out, unused |
-| DAW  | `Midi-Bridge:Launchpad Pro MK3: LPProMK3 DAW`  | `hw:MK3,0,1` | DAW integration / DrivenByMoss session, unused by Super505 |
+| DAW  | `Midi-Bridge:Launchpad Pro MK3: LPProMK3 DAW`  | `hw:MK3,0,1` | DAW integration / DrivenByMoss session, unused by RiftwayLabsLooper |
 
 ## Programmer mode
 
 In **Programmer mode** every pad and button sends/receives a fixed Note number,
 and an incoming Note-On sets that pad's LED by **velocity = color palette index**.
-This is what makes self-contained LED feedback possible from the Super505 JSFX.
+This is what makes self-contained LED feedback possible from the RiftwayLabsLooper JSFX.
 
 - **Enter Programmer mode (sysex):**
   `F0 00 20 29 02 0E 0E 01 F7`
 - **Return to standard/Live mode (sysex):**
   `F0 00 20 29 02 0E 0E 00 F7`
 
-Super505 plan: the JSFX sends the "enter Programmer mode" sysex on init.
+RiftwayLabsLooper plan: the JSFX sends the "enter Programmer mode" sysex on init.
 
 ## Pad note grid (Programmer mode)
 
@@ -45,7 +45,7 @@ Bottom row = 11–18, next row up = 21–28, … top row = 81–88. The outer ri
  11 12 13 14 15 16 17 18     <- bottom pad row
 ```
 
-### Provisional Super505 row assignment
+### Provisional RiftwayLabsLooper row assignment
 
 The spec asks for action rows. Mapping the user's "Row 1 = top" layout onto pad
 numbers (top row 81–88 down to bottom 11–18), **columns 1–5 = tracks 1–5**:
@@ -62,10 +62,10 @@ numbers (top row 81–88 down to bottom 11–18), **columns 1–5 = tracks 1–5
 | Row 8 | Utility          | 11 12 13 14 15 16 17 18 |
 
 Columns 6–8 (x6/x7/x8) are free for scenes/phrase memory later.
-**These note numbers feed directly into the Super505 JSFX note map**, replacing
+**These note numbers feed directly into the RiftwayLabsLooper JSFX note map**, replacing
 the Super8 defaults from [02-super8-analysis.md](02-super8-analysis.md).
 
-> Note: pads send Note-On on **channel 1**, which is exactly what Super8/Super505
+> Note: pads send Note-On on **channel 1**, which is exactly what Super8/RiftwayLabsLooper
 > requires. Good fit.
 
 ## LED colors (velocity palette, channel 1 = static)

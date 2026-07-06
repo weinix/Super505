@@ -1,4 +1,4 @@
-# Super505 — Build Plan (resume)
+# RiftwayLabsLooper — Build Plan (resume)
 
 Status: **plan written, awaiting approval to build.** Nothing in `~/.config/REAPER`
 has been modified yet.
@@ -9,11 +9,11 @@ has been modified yet.
   `hw:3,0,0` = LPProMK3 MIDI (our surface), `hw:3,0,1` = DIN, `hw:3,0,2` = DAW.
   (Doc 01/04 assumed the `hw:MK3` alias — real name is `hw:3,0,0`.)
 - **DrivenByMoss is gone.** `UserPlugins/` is empty, no `DrivenByMoss*` configs.
-  → **Decision 1 (port conflict) is moot.** Super505 owns `LPProMK3 MIDI` freely.
+  → **Decision 1 (port conflict) is moot.** RiftwayLabsLooper owns `LPProMK3 MIDI` freely.
 - **Decision 2 answered: real per-track clear** (user choice 2026-06-20).
 - No Reaper extensions installed (no SWS/js_ReaScriptAPI/ReaImGui/ReaPack) →
   LED feedback comes from the JSFX, as designed.
-- Reaper 7.72, not currently running. Super8 present; super505 not forked yet.
+- Reaper 7.72, not currently running. Super8 present; RiftwayLabsLooper not forked yet.
 
 ### Dev on `bmini` (no UR22C) — 2026-06-20
 
@@ -48,8 +48,8 @@ Colors: empty=off(0), rec=red, overdub=amber, play=green, stopped-w/content=dim,
 - [ ] Confirm Reaper MIDI backend in use (ALSA vs JACK) and the matching port name form.
 - [~] Palette indices: provisional standard LP Pro MK3 values baked as editable `C_*` constants; `ramp` available to fine-tune live.
 
-### 1. Fork super505 JSFX (additive; super8 untouched) — CODE COMPLETE, pending live compile-check
-- [x] Copy `Effects/loopsamplers/super8` → `Effects/loopsamplers/super505`; new `desc:`.
+### 1. Fork RiftwayLabsLooper JSFX (additive; super8 untouched) — CODE COMPLETE, pending live compile-check
+- [x] Copy `Effects/loopsamplers/super8` → `Effects/loopsamplers/RiftwayLabsLooper`; new `desc:`.
 - [x] **Note remap**: init loop now assigns note1=81–85, note2=71–75, note3=31–35, note4=41–45, note5=61–65 (tracks 1–5; channels 6–8 off/128).
 - [x] **Per-track clear**: added `st_note5` + `st_num`=15, set in `init`, handled in `onmsg` → new `chan_clear()` erasing only that channel's buffer, leaving `g_length`/other tracks intact. (note5 not serialized — always re-init to 61–65 defaults, which is what we want.)
 - [x] **Drop pass-through echo**: both `midirecv ? midisend` echoes replaced with `midirecv` only.
@@ -61,20 +61,20 @@ Colors: empty=off(0), rec=red, overdub=amber, play=green, stopped-w/content=dim,
 - [~] Per-track clear: implemented; quick confirm still pending.
 
 **Audio path solved live (was the per-channel input/output gotcha):**
-- Super505 records/plays **each loop on its own channel** (loop N ↔ channel N).
-- INPUT: "Mic In" track (Yeti) → 3 stereo sends to the 8-ch Super505 track at dest **1/2, 3/4, 5/6** → feeds loop channels 1–5.
-- OUTPUT: new **`super505_mixdown`** JSFX (8 in/out pins, sums ch1-8 → stereo 1/2) inserted **after** super505 → all loops reach the master.
+- RiftwayLabsLooper records/plays **each loop on its own channel** (loop N ↔ channel N).
+- INPUT: "Mic In" track (Yeti) → 3 stereo sends to the 8-ch RiftwayLabsLooper track at dest **1/2, 3/4, 5/6** → feeds loop channels 1–5.
+- OUTPUT: new **`RiftwayLabsLooper_mixdown`** JSFX (8 in/out pins, sums ch1-8 → stereo 1/2) inserted **after** RiftwayLabsLooper → all loops reach the master.
 - New JSFX added mid-session isn't indexed until Add-FX browser reopens (or Reaper restart).
 
 **Live setup notes (bmini, verified):**
 - Reaper MIDI backend = JACK/Midi-Bridge. Routing confirmed via `pw-link`: `REAPER:MIDI Output 2 → LPProMK3 MIDI (playback)` (LEDs out), `LPProMK3 MIDI (capture) → REAPER:MIDI Input 2` (pads in).
 - **FX only runs `@block` when the track is processing** → the looper track MUST be record-armed + input-monitoring ON (or transport playing) for LEDs/looping to work.
-- Reloading the JSFX after an external edit = remove/re-add FX (title animates "Super505" = new code live).
+- Reloading the JSFX after an external edit = remove/re-add FX (title animates "RiftwayLabsLooper" = new code live).
 - Audio input available here = **Blue Yeti mic** (no UR22C needed for a real loop test).
 
 ### 2. Reaper project template (additive)
-- [ ] `ProjectTemplates/Super505.RPP` + copy into this repo (`reaper/Super505.RPP`).
-- [ ] Tracks: **Audio In** (UR22C, rec-armed, input monitor, low latency) → **Super505 Looper** (super505 JSFX) → optional FX → optional master limiter.
+- [ ] `ProjectTemplates/RiftwayLabsLooper.RPP` + copy into this repo (`reaper/RiftwayLabsLooper.RPP`).
+- [ ] Tracks: **Audio In** (UR22C, rec-armed, input monitor, low latency) → **RiftwayLabsLooper Looper** (RiftwayLabsLooper JSFX) → optional FX → optional master limiter.
 - [ ] Routing: Launchpad `LPProMK3 MIDI` input → looper track input (ch1); looper track **HW MIDI output → LPProMK3 MIDI** so LED Note-Ons reach the pads.
 - [ ] Click routable to a separate HW out (headphones) if desired.
 
@@ -91,10 +91,10 @@ Colors: empty=off(0), rec=red, overdub=amber, play=green, stopped-w/content=dim,
 - [ ] Update `docs/05-open-decisions.md` (both decisions resolved) and README status.
 
 ### Live session add-ons (bmini, 2026-06-20)
-- [x] **Audio output fold**: `super505_mixdown` JSFX (repo: `reaper/effects/`) sums loop ch1-8 → stereo; all 5 columns audible.
+- [x] **Audio output fold**: `RiftwayLabsLooper_mixdown` JSFX (repo: `reaper/effects/`) sums loop ch1-8 → stereo; all 5 columns audible.
 - [x] **Guitar input**: enya **E-SP1** USB interface routed to Reaper inputs via PipeWire (`tools/route_guitar.sh`, run after reboot/replug). Yeti still available (`--keep`). Track records "Reaper input 1/2" so the template is input-source-agnostic (guitar / Yeti / future UR22C).
-- [x] **Latency**: PipeWire quantum 1024→**256** (~5 ms). Persistent drop-in `~/.config/pipewire/pipewire.conf.d/99-super505-lowlatency.conf` (repo copy in `reaper/`). Revert: delete file / `force-quantum 0`.
-- [ ] **Save Reaper project + "Super505" project template; copy `.rpp` into repo; git commit checkpoint.** ← next
+- [x] **Latency**: PipeWire quantum 1024→**256** (~5 ms). Persistent drop-in `~/.config/pipewire/pipewire.conf.d/99-RiftwayLabsLooper-lowlatency.conf` (repo copy in `reaper/`). Revert: delete file / `force-quantum 0`.
+- [ ] **Save Reaper project + "RiftwayLabsLooper" project template; copy `.rpp` into repo; git commit checkpoint.** ← next
 - [ ] Confirm per-track Clear; then utility-row Reaper actions.
 
 ## Deferred (post-MVP)
@@ -131,8 +131,8 @@ Implemented per doc 06 §7 (now the design record). Summary:
 - [x] AllStart/AllStop preserve per-track lengths; kill/clear forget lengths but keep settings.
 - [x] Serialization: sync/qmode/fixlen persist per track (back-compat guarded).
 - [x] Tests: `cd tests && pytest` — 18 passing (sample-accurate engine model, 120 BPM spec scenario).
-- [x] Deployed to `~/.config/REAPER/Effects/loopsamplers/super505`
-      (backup: `super505.pre-v1len.bak`).
+- [x] Deployed to `~/.config/REAPER/Effects/loopsamplers/RiftwayLabsLooper`
+      (backup: `RiftwayLabsLooper.pre-v1len.bak`).
 - [x] **Live verify**: 1-bar drum + 8-bar guitar independent lengths confirmed working (2026-07-05).
 - [ ] Live verify remaining: FREE mode, row-2 action pads, MASTER_SYNC, AllStart/AllStop.
 
@@ -140,16 +140,16 @@ Implemented per doc 06 §7 (now the design record). Summary:
 
 Pressing rec on looper rows 1-5 auto record-arms the REAPER track(s) feeding that
 looper channel (fixes "rows 3-5 record silence because source tracks weren't armed").
-- [x] JSFX publishes to gmem namespace `Super505`: [0]=heartbeat, [1]=want-input
+- [x] JSFX publishes to gmem namespace `RiftwayLabsLooper`: [0]=heartbeat, [1]=want-input
       bitmask (armed / recording / count-in channels), [2]=nchan.
-- [x] `reaper/scripts/super505_arm_bridge.lua`: defer loop, on a rising mask bit
+- [x] `reaper/scripts/RiftwayLabsLooper_arm_bridge.lua`: defer loop, on a rising mask bit
       finds the track(s) whose receive on the looper covers that channel (mapping
       follows the SENDS, not track order) and sets I_RECARM + I_RECMON. One-way:
       never auto-disarms. Warns in the console if a channel has no feeding send.
 - [x] `reaper/scripts/__startup.lua` auto-starts the bridge at REAPER launch.
 - [x] Deployed: JSFX + both scripts to `~/.config/REAPER` (Scripts/, Effects/).
 - [x] Model tests for the gmem mask protocol (20 passing total).
-- [ ] **Live verify**: restart REAPER (or Actions -> run `super505_arm_bridge.lua`
+- [ ] **Live verify**: restart REAPER (or Actions -> run `RiftwayLabsLooper_arm_bridge.lua`
       once) + re-add the FX; press rec on row 3/4 -> Vocal/Bass tracks arm.
       NOTE: sends must exist (Bass Guitar still needs a send -> looper ch, see
       routing fix); the bridge prints a console warning if a send is missing.

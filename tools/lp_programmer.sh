@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lp_programmer.sh — Launchpad Pro MK3 bring-up helper for Super505.
+# lp_programmer.sh — Launchpad Pro MK3 bring-up helper for RiftwayLabsLooper.
 #
 # Talks to the Launchpad's "LPProMK3 MIDI" port via ALSA raw MIDI (amidi),
 # independent of Reaper. Auto-detects the port by name (card numbers differ
@@ -15,7 +15,7 @@
 #   tools/lp_programmer.sh live              # return to standard/Live mode
 #   tools/lp_programmer.sh off               # turn all 64 pads off
 #   tools/lp_programmer.sh pad NOTE VEL [CH] # light one pad (decimals; CH 1=static 2=flash 3=pulse)
-#   tools/lp_programmer.sh layout            # paint the Super505 row layout (verify pad numbers)
+#   tools/lp_programmer.sh layout            # paint the RiftwayLabsLooper row layout (verify pad numbers)
 #   tools/lp_programmer.sh ramp [START]      # palette explorer: pads 11..88 = indices START..START+63
 set -euo pipefail
 
@@ -50,7 +50,7 @@ grid_pads() { for r in 1 2 3 4 5 6 7 8; do for c in 1 2 3 4 5 6 7 8; do echo $((
 
 all_off() { enter_programmer; for n in $(grid_pads); do note_on "$n" 0 1; done; }
 
-# Provisional Super505 palette indices (confirm/adjust visually with `ramp`)
+# Provisional RiftwayLabsLooper palette indices (confirm/adjust visually with `ramp`)
 C_RED=5; C_AMBER=9; C_GREEN=21; C_DIM=45; C_WHITE=3; C_UTIL=1
 
 paint_layout() {
@@ -80,7 +80,7 @@ case "$cmd" in
   live)   enter_live; echo "Live mode (standard) ON" ;;
   off|clear) all_off; echo "all pads off" ;;
   pad)    note_on "$2" "$3" "${4:-1}"; echo "lit pad $2 vel $3 ch ${4:-1}" ;;
-  layout) paint_layout; echo "painted Super505 layout (run 'live' or 'off' to restore)" ;;
+  layout) paint_layout; echo "painted RiftwayLabsLooper layout (run 'live' or 'off' to restore)" ;;
   ramp)   paint_ramp "${2:-0}"; echo "painted palette ramp from ${2:-0} (each pad's color = its index)" ;;
   *)
     grep '^#' "$0" | sed '1d;s/^# \{0,1\}//'
