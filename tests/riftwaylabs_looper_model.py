@@ -53,7 +53,7 @@ class Track:
 
 
 class Engine:
-    def __init__(self, srate=48000, tempo=120, nch=5, maxlen=10**9,
+    def __init__(self, srate=48000, tempo=120, nch=6, maxlen=10**9,
                  ts_num=4, ts_den=4, clickcnt=0):
         self.srate = srate
         self.tempo = tempo

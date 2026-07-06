@@ -80,7 +80,7 @@ tags:looper midi sampler
 out_pin:monitor output
 out_pin:click output
 
-config: nch "Channels" 8 1 2 4 8="8 (namesake)" 12 16 24 32 48
+config: nch "Channels" 6 1 2 4 6="6 (default)" 8 12 16 24 32 48
 config: maxmem "Memory Size -preserve-config" 256 64="64MB - max length 0:23 for 8 channels @ 44.1kHz" 128="128MB - max length 0:47 for 8 channels @ 44.1kHz" 256="256MB (default) - max length 1:35 for 8 channels @ 44.1kHz" 512="512MB - max length 3:10 for 8 channels @ 44.1kHz" 1024="1GB - max length 6:20 for 8 channels @ 44.1kHz"
 
 options: maxmem=<? printf("%d",maxmem*1024*128); ?> no_meter gfx_idle prealloc=* gmem=RiftwayLabs
@@ -904,13 +904,13 @@ ext_noinit == 0 ? (
   mem_sysex_prog[6]=0x0E; mem_sysex_prog[7]=0x01; mem_sysex_prog[8]=0xF7;
 
   // RiftwayLabsLooper v2 Launchpad Pro MK3 pad map (Programmer mode, channel 1): ROWS = tracks.
-  // Track i uses grid row r = 8-i (rows 8,7,6,5,4 for tracks 1..5); note = r*10+col.
+  // Track i uses grid row r = 8-i (rows 8,7,6,5,4,3 for tracks 1..6); note = r*10+col.
   //   col1 REC=r1  col2 STOP=r2  col3 CLEAR=r3  col4 UNDO=r4
   //   col5 FX=r5   col6 SOLO=r6  col7 MUTE=r7   col8 STATUS+SELECT=r8
   //   REVERSE drops off the grid (note4=128, still reachable in the GUI tweakers).
   //   init args order: (idx, rec,stop,select,reverse,clear, undo,fx,solo,mute)
   <? loop(x=0; nch,
-      x < 5 ? (
+      x < 6 ? (
         r = 8 - x;
         printf("ch%d.init(%d, %d,%d,%d,128,%d, %d,%d,%d,%d);\n",
           x+1, x,
@@ -1046,7 +1046,7 @@ function doconf() local(i,s) (
     // note assignments restored from an older (column-layout) project. st_mute
     // is left as read (mute state persists); only the note map is forced.
     <? loop(x=0; nch,
-        x < 5 ? (
+        x < 6 ? (
           r = 8 - x;
           printf("i=mem_stlist+%d*st_num; i[st_note1]=%d;i[st_note2]=%d;i[st_note3]=%d;i[st_note4]=128;i[st_note5]=%d;i[st_note6]=%d;i[st_note7]=%d;i[st_note8]=%d;i[st_note9]=%d;\n",
             x, r*10+1,r*10+2,r*10+8,r*10+3,r*10+4,r*10+5,r*10+6,r*10+7);
@@ -1180,7 +1180,7 @@ i_srate = 1.0/srate;
 //   col1 REC/PLAY/OD  col2 STOP  col3 CLEAR  col4 UNDO(stub)
 //   col5 FX(stub)     col6 SOLO  col7 MUTE   col8 STATUS+SELECT
 // Self-healing: enter Programmer mode once, then every ~0.5s repaint the static
-// columns + blank the unused rows 1-3, and force the dynamic pads to re-send.
+// columns + blank the unused row 1, and force the dynamic pads to re-send.
 g_s505_phase == 0 ? (
   midisend_buf(0, mem_sysex_prog, 9);        // enter Programmer mode
   g_s505_phase = 1;
@@ -1190,17 +1190,16 @@ g_s505_phase == 0 ? (
   g_s505_t >= srate*0.5 ? (
     g_s505_t = 0;
     s505_i = 0;
-    loop(min(g_nchan,5),
+    loop(min(g_nchan,6),
       s505_base = (8 - s505_i) * 10;             // track i -> grid row 8-i
       midisend(0, 0x90, s505_base+2, C_GREEN);   // col2 STOP  (static)
       midisend(0, 0x90, s505_base+3, C_AMBER);   // col3 CLEAR (static)
       midisend(0, 0x90, s505_base+4, C_UNDO_DIM);// col4 UNDO  (reserved/dim)
       s505_i += 1;
     );
-    s505_i = 11;                                  // blank unused rows 1,3 (row 2 = action pads)
+    s505_i = 11;                                  // blank unused row 1 (row 2 = action pads, row 3 = track 6)
     loop(8,
-      midisend(0, 0x90, s505_i,    C_OFF);
-      midisend(0, 0x90, s505_i+20, C_OFF);
+      midisend(0, 0x90, s505_i, C_OFF);
       s505_i += 1;
     );
     memset(mem_led_last, -1, 64);                 // force dynamic pads to re-send
@@ -1211,7 +1210,7 @@ g_s505_phase == 0 ? (
 // Per-track dynamic pads, every block (send-on-change; idx = track*8 + col-1).
 g_s505_phase >= 1 ? (
   s505_i = 0;
-  loop(min(g_nchan,5),
+  loop(min(g_nchan,6),
     s505_rec  = mem_stlist + s505_i*st_num;
     s505_base = (8 - s505_i) * 10;
     s505_st   = s505_rec[st_state];
@@ -1274,7 +1273,7 @@ g_s505_phase >= 1 ? (
   // Row 2 = action pads: cols 1-4 length presets (1/2/4/8 bars; green = the
   // selected track's current bars), cols 5-7 sync mode (amber = active mode),
   // col 8 sync-mode toggle. Dim when no track is selected.
-  s505_rec  = (g_chan_selected >= 0 && g_chan_selected < min(g_nchan,5)) ? mem_stlist + g_chan_selected*st_num : -1;
+  s505_rec  = (g_chan_selected >= 0 && g_chan_selected < min(g_nchan,6)) ? mem_stlist + g_chan_selected*st_num : -1;
   s505_bars = s505_rec >= 0 ? (s505_rec[st_mult] > 0 ? s505_rec[st_mult] : s505_rec[st_fixlen]) : 0;
   s505_sync = s505_rec >= 0 ? s505_rec[st_sync] : -1;
   s505_i = 0;
