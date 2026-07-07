@@ -463,18 +463,19 @@ loop(g_nch,
   g_si += 1;
 );
 
-@gfx 300 168
+@gfx 440 168
 gfx_clear = 0;
 gfx_set(0.9,0.9,0.9);
 gfx_x=6; gfx_y=6;
-gfx_drawstr("RiftwayLabsLooper NG");
+gfx_drawstr("RiftwayLabsLooper NG   sy:0=Free 1=Meas 2=Master   q:0=off 1=beat 2=bar");
 g_gi=0;
 loop(min(g_nch,6),
   g_gtp = trk(g_gi);
   gfx_x=6; gfx_y=24 + g_gi*14;
   g_gi==g_sel ? gfx_set(0.9,0.8,0.4) : gfx_set(0.6,0.6,0.7);
-  gfx_printf("T%d  st=%d  len=%d  bars=%d  gain=%.2f",
-    g_gi+1, g_gtp[T_STATE], g_gtp[T_LEN], g_gtp[T_BARS], g_gtp[T_GAIN]);
+  gfx_printf("T%d st=%d len=%d bars=%d sy=%d q=%d fx=%d g=%.2f",
+    g_gi+1, g_gtp[T_STATE], g_gtp[T_LEN], g_gtp[T_BARS],
+    g_gtp[T_SYNC], g_gtp[T_QMODE], g_gtp[T_FIXLEN], g_gtp[T_GAIN]);
   g_gi+=1;
 );
 // --- MIDI monitor: press a button to read its raw type/number, then set the
