@@ -21,8 +21,8 @@ tags:looper midi sampler
 options:gmem=RiftwayLabs no_meter gfx_idle maxmem=33554432 prealloc=*
 
 slider1:g_slider_action=0<0,8,1{-,Len1Bar,Len2Bars,Len4Bars,Len8Bars,SyncFree,SyncMeasure,SyncMaster,SyncToggle}>-Action trigger (selected track, self-resets)
-slider2:g_play_cc=0<0,127,1>-LP Play button CC (0=off; read live via GUI monitor)
-slider3:g_clear_cc=0<0,127,1>-LP Clear button CC (0=off; read live via GUI monitor)
+slider2:g_play_cc=20<0,127,1>-LP Play button CC = AllStart/Stop (0=off; verified LP Pro MK3)
+slider3:g_clear_cc=19<0,127,1>-LP Clear button CC = kill+grid reset (0=off; verified LP Pro MK3)
 
 @init
 g_nch = <? printf("%d", nch) ?>;

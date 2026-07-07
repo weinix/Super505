@@ -34,6 +34,19 @@ Pads are numbered **row*10 + column**, bottom-left = `11`, top-right = `88`.
 Bottom row = 11–18, next row up = 21–28, … top row = 81–88. The outer ring
 (logo, scene launch, CC buttons) uses other numbers in the 1–99 range.
 
+### Confirmed transport button CCs (live, Programmer mode)
+
+Snooped via `tools/print_launchpad_key.sh` (2026-07-07). Outer-ring buttons send
+**Control Change** on ch 1, value 127 on press / 0 on release:
+
+| Function (RiftwayLabsLooper NG) | Physical button | CC |
+|---------------------------------|-----------------|----|
+| **Play-all** (AllStart/AllStop toggle) | user's play button | **20** |
+| **Clear-all** (kill + grid reset)      | user's clear button | **19** |
+
+Wired as the `g_play_cc` / `g_clear_cc` slider defaults in `RiftwayLabsLooper_ng`.
+The engine acts on press only (non-zero value).
+
 ```
  81 82 83 84 85 86 87 88     <- top pad row
  71 72 73 74 75 76 77 78
