@@ -14,13 +14,15 @@ tags:looper midi sampler
 
 <? nch < 1 ? nch = 6 ?>
 <?
-  loop(x=0;nch, printf("in_pin:in %d\n", x+1));
-  loop(x=0;nch, printf("out_pin:out %d\n", x+1));
+  loop(x=0;nch, printf("in_pin:in %d\n", x+=1));
+  loop(x=0;nch, printf("out_pin:out %d\n", x+=1));
 ?>
 
 options:gmem=RiftwayLabs no_meter gfx_idle maxmem=33554432 prealloc=*
 
 slider1:g_slider_action=0<0,8,1{-,Len1Bar,Len2Bars,Len4Bars,Len8Bars,SyncFree,SyncMeasure,SyncMaster,SyncToggle}>-Action trigger (selected track, self-resets)
+slider2:g_play_cc=0<0,127,1>-LP Play button CC (0=off; read live via GUI monitor)
+slider3:g_clear_cc=0<0,127,1>-LP Clear button CC (0=off; read live via GUI monitor)
 
 @init
 g_nch = <? printf("%d", nch) ?>;
@@ -231,6 +233,25 @@ function all_start() local(i tp) (
   );
 );
 
+// LP Play: toggle. anything playing/recording/overdubbing -> AllStop, else AllStart.
+// Never clears buffers, never resets lengths.
+function play_toggle() local(i tp active) (
+  active = 0;
+  i=0; loop(g_nch, tp=trk(i);
+    (tp[T_STATE]==S_PLAY || tp[T_STATE]==S_REC || tp[T_STATE]==S_OVERDUB) ? active=1;
+    i+=1;
+  );
+  active ? all_stop() : all_start();
+);
+
+// LP Clear: kill all, clear every track (buffers + lengths), reset the shared
+// grid -> fresh-session state without an FX reload. Per-track settings survive.
+function clear_all() local(i) (
+  i=0; loop(g_nch, clear_trk(i); i+=1;);
+  g_grid_len=0; g_grid_pos=0; g_grid_cycle=0;
+  g_sel=-1;
+);
+
 function advance_grid() local(i tp running) (
   running = 0;
   i=0; loop(g_nch, tp=trk(i);
@@ -249,9 +270,14 @@ function advance_grid() local(i tp running) (
   ) : !running ? ( g_grid_pos=0; g_grid_cycle=0; );
 );
 
-function onmsg(m2) local(i tp done) (
+function onmsg(m2) local(i tp done cc) (
   done = 0;
-  (m2 >= 21 && m2 <= 28) ? ( rl_action(m2-20); done=1; );
+  // CC range (normalized as raw+129): LP transport buttons
+  m2 >= 129 && m2 < 258 ? (
+    cc = m2 - 129;
+    (g_play_cc > 0 && cc == g_play_cc)   ? ( play_toggle(); done=1; ) :
+    (g_clear_cc > 0 && cc == g_clear_cc) ? ( clear_all();   done=1; );
+  ) : (m2 >= 21 && m2 <= 28) ? ( rl_action(m2-20); done=1; );
   !done ? (
     i=0; loop(g_nch, tp=trk(i);
       !done ? (
@@ -375,6 +401,7 @@ g_beat = max((g_bar / ts_num)|0, 1);
 // Note-on -> m2 (0..127); CC -> m2+129; PC -> m2+258 (unified learnable key).
 // Act only on non-zero velocity/value so a note-off / CC release doesn't retrigger.
 while (midirecv(g_mo, g_m1, g_m2, g_m3)) (
+  g_m3 != 0 ? ( g_dbg_s = g_m1; g_dbg_d1 = g_m2; g_dbg_d2 = g_m3; );  // monitor (raw, button-down)
   g_ms = g_m1 & 0xF0;
   g_ms == 0xB0 ? ( g_m2 += 129; ) :
   g_ms == 0xC0 ? ( g_m2 += 258; g_m3 = 127; );
@@ -424,7 +451,7 @@ loop(g_nch,
   g_si += 1;
 );
 
-@gfx 300 120
+@gfx 300 168
 gfx_clear = 0;
 gfx_set(0.9,0.9,0.9);
 gfx_x=6; gfx_y=6;
@@ -438,3 +465,11 @@ loop(min(g_nch,6),
     g_gi+1, g_gtp[T_STATE], g_gtp[T_LEN], g_gtp[T_BARS], g_gtp[T_GAIN]);
   g_gi+=1;
 );
+// --- MIDI monitor: press a button to read its raw type/number, then set the
+//     Play/Clear CC sliders (CC status shows as B0). ---
+gfx_x=6; gfx_y=24 + 6*14 + 6;
+gfx_set(0.5,0.75,0.55);
+gfx_printf("last MIDI  st=%02X d1=%d d2=%d", g_dbg_s, g_dbg_d1, g_dbg_d2);
+gfx_x=6; gfx_y=gfx_y+14;
+gfx_set(0.55,0.55,0.65);
+gfx_printf("play_cc=%d  clear_cc=%d", g_play_cc, g_clear_cc);

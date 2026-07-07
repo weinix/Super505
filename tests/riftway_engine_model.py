@@ -313,6 +313,26 @@ class Engine:
                 t._play_target = 1.0
                 t._rec_target = 0.0
 
+    def press_play(self):
+        """LP Play button: a toggle. If anything is playing / recording /
+        overdubbing -> AllStop; otherwise -> AllStart. Never clears buffers,
+        never resets track lengths."""
+        active = any(t.state in (PLAY, REC, OVERDUB) for t in self.tracks)
+        if active:
+            self.all_stop()
+        else:
+            self.all_start()
+
+    def clear_all(self):
+        """LP Clear button: kill all playback/recording, clear every track
+        (buffers + lengths), and reset the shared grid to a fresh-session state
+        (grid_len/pos/cycle = 0) without reloading. Per-track *settings* (sync,
+        quantize, gain) survive, exactly like a single-track clear."""
+        for i in range(len(self.tracks)):
+            self.press_clear(i)
+        self.grid_len = self.grid_pos = self.grid_cycle = 0
+        self.selected = -1
+
     # ---- action dispatcher (ids mirror the JSFX rl_action) ---------------
     def action(self, aid):
         if aid in (1, 2, 3, 4):

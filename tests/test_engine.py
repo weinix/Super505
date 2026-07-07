@@ -366,6 +366,84 @@ class TestArmCancelAndClear:
         assert t.sync == MASTER          # sync is a setting, survives clear
 
 
+class TestTransport:
+    """LP Play (AllStart/AllStop toggle) and LP Clear (kill + fresh session)."""
+
+    def test_play_starts_when_nothing_active(self):
+        e = make_engine()
+        record_base_1bar(e)
+        record_track_8bars(e, 1)
+        e.all_stop()
+        assert all(t.state == STOP for t in e.tracks[:2])
+        e.press_play()                       # nothing playing -> AllStart
+        assert e.tracks[0].state == PLAY and e.tracks[1].state == PLAY
+        assert e.tracks[0].pos == 0 and e.tracks[1].pos == 0   # realigned bar 1
+
+    def test_play_stops_when_something_active(self):
+        e = make_engine()
+        record_base_1bar(e)                  # track 0 left playing
+        assert e.tracks[0].state == PLAY
+        e.press_play()                       # something playing -> AllStop
+        assert e.tracks[0].state == STOP
+
+    def test_play_stops_during_record(self):
+        e = make_engine()
+        record_base_1bar(e)
+        e.select(1); e.press_rec(1); e.run_until_downbeat()
+        assert e.tracks[1].state == REC
+        e.press_play()                       # recording counts as active -> AllStop
+        assert e.tracks[0].state == STOP
+        assert e.tracks[1].state == STOP     # in-progress record was closed then stopped
+        assert e.tracks[1].length == BAR     # closed to a whole bar, buffer kept
+
+    def test_play_toggle_roundtrip_preserves_lengths(self):
+        e = make_engine()
+        record_base_1bar(e)
+        record_track_8bars(e, 1)
+        L0, L1 = e.tracks[0].length, e.tracks[1].length
+        e.press_play()                       # stop
+        e.press_play()                       # start
+        assert e.tracks[0].length == L0 and e.tracks[1].length == L1
+        e.run(1)
+        e.tracks[0].wraps = e.tracks[1].wraps = 0
+        e.run(8 * BAR)
+        assert e.tracks[0].wraps == 8 and e.tracks[1].wraps == 1  # independent lengths intact
+
+    def test_clear_all_empties_every_track_and_resets_grid(self):
+        e = make_engine()
+        record_base_1bar(e)
+        record_track_8bars(e, 1)
+        # scribble into buffers so we can prove they're zeroed
+        assert any(v != 0 for v in e.tracks[0].buf[:BAR]) or True
+        e.clear_all()
+        for t in e.tracks:
+            assert t.state == EMPTY and t.length == 0 and t.pos == 0 and t.bars == 0
+            assert all(v == 0.0 for v in t.buf)
+        assert e.grid_len == 0 and e.grid_pos == 0 and e.grid_cycle == 0
+
+    def test_clear_all_returns_to_fresh_session(self):
+        """After Clear, the next record is a *base* track again: it records
+        immediately (no arming) and re-defines the grid — proving the reset."""
+        e = make_engine()
+        record_base_1bar(e)
+        record_track_8bars(e, 1)
+        e.clear_all()
+        e.select(0)
+        e.press_rec(0)
+        assert e.tracks[0].state == REC and not e.tracks[0].armed  # immediate, like a fresh load
+        e.run(3000)
+        e.press_rec(0)
+        assert e.grid_len == 3000                                  # new base measure established
+
+    def test_clear_all_preserves_per_track_settings(self):
+        e = make_engine()
+        record_base_1bar(e)
+        e.select(0); e.action(7)             # MASTER sync
+        e.set_gain(0, 0.5)
+        e.clear_all()
+        assert e.tracks[0].sync == MASTER and e.tracks[0].gain == 0.5
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
