@@ -41,7 +41,7 @@ Q_OFF=0; Q_BEAT=1; Q_BAR=2;
 M_NONE=0; M_SYNCED=1; M_FREE=2;
 
 // Launchpad Pro MK3 LED palette (Programmer mode velocities)
-C_OFF=0; C_RED=5; C_AMBER=9; C_GREEN=21; C_DIM=45;
+C_OFF=0; C_RED=5; C_AMBER=9; C_GREEN=21; C_DIM=45; C_YELLOW=13;
 
 g_overdub_fb = 1.0;   // v1: additive overdub, no decay (reserved param)
 
@@ -55,6 +55,14 @@ recalc_slopes();
 
 // ---- leaf helpers -----------------------------------------------------------
 function eqpow(e) ( sin(max(0,min(1,e)) * $pi * 0.5); );
+
+// send one pad LED only when its (color,channel) changed. slot = mem_led index.
+function led_set(slot, note, ch, col) (
+  mem_led[slot] != col*4 + ch ? (
+    mem_led[slot] = col*4 + ch;
+    midisend(0, 0x90 + ch, note, col);
+  );
+);
 
 function approach(v, tgt, up, dn) (
   tgt > v ? min(v+up, tgt) : tgt < v ? max(v-dn, tgt) : v;
@@ -345,7 +353,7 @@ ext_noinit==0 ? (
   ext_nodenorm=1;
   g_top = 16;
   mem_tracks = g_top; g_top += g_nch*T_NUM;
-  mem_led = g_top; g_top += 8;
+  mem_led = g_top; g_top += 24;      // 3 pads/track (state, solo, mute) x up to 8
   mem_sysex = g_top; g_top += 9;
   g_maxlen = ((__memtop() - g_top - 64) / g_nch)|0;
 
@@ -376,7 +384,7 @@ ext_noinit==0 ? (
 
   mem_sysex[0]=0xF0; mem_sysex[1]=0x00; mem_sysex[2]=0x20; mem_sysex[3]=0x29;
   mem_sysex[4]=0x02; mem_sysex[5]=0x0E; mem_sysex[6]=0x0E; mem_sysex[7]=0x01; mem_sysex[8]=0xF7;
-  memset(mem_led, -1, 8);
+  memset(mem_led, -1, 24);
 );
 
 g_led_phase = 0;   // re-enter Programmer mode after each (re)load
@@ -439,18 +447,18 @@ g_led_phase == 0 ? (
   g_bi = 0;
   loop(min(g_nch,6),
     g_btp = trk(g_bi);
+    g_brow = (8 - g_bi) * 10;
+    // col 1: transport/state
     g_bst = g_btp[T_STATE];
-    g_btp[T_ARMED] ? ( g_bcol=C_RED; g_bch=1; ) :
-    g_bst==S_REC ? ( g_bcol=C_RED; g_bch=1; ) :
+    (g_btp[T_ARMED] || g_bst==S_REC) ? ( g_bcol=C_RED; g_bch=1; ) :
     g_bst==S_OVERDUB ? ( g_bcol=C_AMBER; g_bch=0; ) :
     g_bst==S_PLAY ? ( g_bcol=C_GREEN; g_bch=0; ) :
     g_bst==S_STOP ? ( g_bcol=C_DIM; g_bch=0; ) :
     ( g_bcol=C_OFF; g_bch=0; );
-    g_bcode = g_bcol*2 + g_bch;
-    mem_led[g_bi] != g_bcode ? (
-      mem_led[g_bi] = g_bcode;
-      midisend(0, 0x90 + g_bch, (8-g_bi)*10 + 1, g_bcol);
-    );
+    led_set(g_bi*3+0, g_brow+1, g_bch, g_bcol);
+    // col 6: solo (yellow when soloed), col 7: mute (red when muted)
+    led_set(g_bi*3+1, g_brow+6, 0, g_btp[T_SOLO] ? C_YELLOW : C_OFF);
+    led_set(g_bi*3+2, g_brow+7, 0, g_btp[T_MUTE] ? C_RED : C_OFF);
     g_bi += 1;
   );
 );
