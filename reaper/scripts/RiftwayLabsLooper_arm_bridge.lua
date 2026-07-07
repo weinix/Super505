@@ -17,13 +17,16 @@
 -- SELF-HEALING: the looper track is re-discovered (no restart needed) when the
 -- heartbeat stalls (FX bypassed/removed/errored) and then resumes, or whenever
 -- the cached track no longer holds the looper FX. Healthy-state behavior is
--- unchanged. Light logging marks every (re)discovery / stall / resume.
+-- unchanged. The console ONLY pops up for actionable issues (e.g. a looper
+-- channel armed with no source send); routine (re)discovery/stall/resume is
+-- silent unless VERBOSE is set below.
 --
 -- Install: run once per session (Actions -> Load ReaScript), or let
 -- Scripts/__startup.lua launch it automatically at REAPER startup.
 
 local NS = "RiftwayLabs"
 local STALL_TICKS = 60          -- deferred ticks (~2s) w/o heartbeat => FX stopped
+local VERBOSE = false           -- true => also log routine (re)discovery/stall/resume
 
 reaper.gmem_attach(NS)
 
@@ -34,8 +37,14 @@ local stalled = false           -- true while the looper FX heartbeat is not adv
 local looper = nil
 local warned = 0                -- bits already warned about (no source found)
 
-local function log(msg)
+-- issue(): actionable problems — surfaces (pops open) the ReaScript console.
+local function issue(msg)
   reaper.ShowConsoleMsg("RiftwayLabsLooper_arm_bridge: " .. msg .. "\n")
+end
+
+-- info(): routine lifecycle — silent unless VERBOSE (no console popup).
+local function info(msg)
+  if VERBOSE then issue(msg) end
 end
 
 -- does this track currently hold the (non-mixdown) looper FX?
@@ -66,9 +75,9 @@ local function ensure_looper()
   if tr ~= looper then
     looper = tr
     if looper then
-      log(("(re)discovered looper on track %d"):format((idx or 0) + 1))
+      info(("(re)discovered looper on track %d"):format((idx or 0) + 1))
     else
-      log("looper FX not found (missing/disabled?) — will retry")
+      info("looper FX not found (missing/disabled?) — will retry")
     end
     last_mask = 0               -- re-evaluate arm state against the fresh track
     warned = 0
@@ -120,7 +129,7 @@ local function tick()
     hb_idle = 0
     if stalled then                        -- FX came back to life
       stalled = false
-      log("heartbeat resumed — rediscovering looper")
+      info("heartbeat resumed — rediscovering looper")
       looper = nil                         -- force a fresh discovery
       last_mask = 0
       warned = 0
@@ -129,7 +138,7 @@ local function tick()
     hb_idle = hb_idle + 1
     if not stalled and hb_idle >= STALL_TICKS then
       stalled = true                       -- FX bypassed / removed / errored
-      log("heartbeat stalled — looper FX stopped; pausing until it returns")
+      info("heartbeat stalled — looper FX stopped; pausing until it returns")
     end
   end
 
@@ -146,7 +155,7 @@ local function tick()
           if (rising & bit) ~= 0 then
             if not arm_sources(ch) and (warned & bit) == 0 then
               warned = warned | bit
-              log(("no track sends into looper channel %d — add a send (Track -> RiftwayLabsLooper, dest channel %d)")
+              issue(("no track sends into looper channel %d — add a send (Track -> RiftwayLabsLooper, dest channel %d)")
                 :format(ch + 1, ch + 1))
             end
           end
