@@ -171,6 +171,11 @@ class Engine:
             self._start_play(i)
         self.selected = i
 
+    def _any_content(self):
+        """True while at least one track holds a loop or is actively capturing."""
+        return any(t.length > 0 or t.state in (REC, OVERDUB) or t.armed
+                   for t in self.tracks)
+
     def press_clear(self, i):
         t = self.tracks[i]
         for k in range(t.length):
@@ -180,6 +185,12 @@ class Engine:
         t.meas = t.meas_count = 0
         t.armed = False
         t.rec_env = t.play_env = t._rec_target = t._play_target = 0.0
+        # the shared grid exists only while some track has content: clearing the
+        # LAST content dissolves it -> the next record is a fresh base measure.
+        # (Clearing one of several playing tracks keeps the grid so the re-record
+        # arms in sync.)
+        if not self._any_content():
+            self.grid_len = self.grid_pos = self.grid_cycle = 0
 
     def _begin_record(self, i):
         t = self.tracks[i]

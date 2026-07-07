@@ -365,6 +365,38 @@ class TestArmCancelAndClear:
         assert t.length == 0 and t.bars == 0 and t.state == EMPTY
         assert t.sync == MASTER          # sync is a setting, survives clear
 
+    def test_clear_last_track_dissolves_grid(self):
+        """Clearing the ONLY content resets the grid -> next record is a fresh
+        base measure that records immediately (regression: T1 rec after clear)."""
+        e = make_engine()
+        record_base_1bar(e)              # T0 is the only track with content
+        e.press_clear(0)
+        assert e.grid_len == 0 and e.grid_pos == 0 and e.grid_cycle == 0
+        e.select(0); e.press_rec(0)
+        assert e.tracks[0].state == REC and not e.tracks[0].armed  # immediate, not armed
+
+    def test_clear_one_of_several_keeps_grid(self):
+        """Clearing a track while others still play keeps the grid so the
+        re-record arms in sync rather than redefining the base."""
+        e = make_engine()
+        record_base_1bar(e)
+        record_track_8bars(e, 1)
+        e.press_clear(1)                 # T0 still playing
+        assert e.grid_len == BAR         # grid preserved
+        e.select(1); e.press_rec(1)
+        assert e.tracks[1].armed         # syncs to the grid, not immediate
+
+    def test_clear_stopped_track_keeps_grid(self):
+        """A stopped-but-recorded track still counts as content."""
+        e = make_engine()
+        record_base_1bar(e)
+        record_track_8bars(e, 1)
+        e.all_stop()                     # both stopped, buffers intact
+        e.press_clear(1)                 # T0 stopped but has a loop
+        assert e.grid_len == BAR         # grid preserved (T0 content remains)
+        e.press_clear(0)                 # now nothing left
+        assert e.grid_len == 0           # grid dissolves
+
 
 class TestTransport:
     """LP Play (AllStart/AllStop toggle) and LP Clear (kill + fresh session)."""

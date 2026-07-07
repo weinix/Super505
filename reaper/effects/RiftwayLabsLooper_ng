@@ -141,11 +141,23 @@ function end_overdub(i)   local(tp) ( tp=trk(i); tp[T_STATE]=S_PLAY; tp[T_RECTGT
 function start_play(i)    local(tp) ( tp=trk(i); tp[T_STATE]=S_PLAY; tp[T_POS]= tp[T_SYNC]==SY_FREE ? 0 : grid_phase(tp); tp[T_PLAYTGT]=1; tp[T_RECTGT]=0; );
 function stop_trk(i)      local(tp) ( tp=trk(i); tp[T_STATE]=S_STOP; tp[T_PLAYTGT]=0; tp[T_RECTGT]=0; );
 
+// true while any track holds a loop or is actively capturing/armed
+function any_content() local(i tp r) (
+  r=0; i=0; loop(g_nch, tp=trk(i);
+    (tp[T_LEN]>0 || tp[T_STATE]==S_REC || tp[T_STATE]==S_OVERDUB || tp[T_ARMED]) ? r=1;
+    i+=1;
+  );
+  r;
+);
+
 function clear_trk(i) local(tp k) (
   tp=trk(i); k=0; while (k < tp[T_LEN]) ( tp[T_BUF][k]=0; k+=1; );
   tp[T_STATE]=S_EMPTY; tp[T_LEN]=0; tp[T_POS]=0; tp[T_BARS]=0; tp[T_ANCHOR]=0;
   tp[T_MEAS]=0; tp[T_MEASCNT]=0; tp[T_ARMED]=0;
   tp[T_RECENV]=0; tp[T_PLAYENV]=0; tp[T_RECTGT]=0; tp[T_PLAYTGT]=0;
+  // grid exists only while some track has content: clearing the LAST content
+  // dissolves it so the next record is a fresh base measure (records immediately).
+  !any_content() ? ( g_grid_len=0; g_grid_pos=0; g_grid_cycle=0; );
 );
 
 // ---- action dispatcher (rl_action; FCB1010 + Launchpad row 2 land here) -----
