@@ -94,7 +94,7 @@ Grid rows 8..3 (top→down) = Tracks 1..6. Per-track columns:
 
 Column 1 shows state only; column 8 shows selection only — never overloaded.
 Velocities: red=5, yellow=13, green=21, dim green=19, blue=45; flashing via
-Note-On channel 2 (0x91), static via channel 1 (0x90). (19/45 to confirm live.)
+Note-On channel 2 (0x91), static via channel 1 (0x90). All verified live 2026-07-08.
 
 ## LED colors (velocity palette, channel 1 = static)
 
