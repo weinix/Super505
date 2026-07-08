@@ -81,6 +81,21 @@ the Super8 defaults from [02-super8-analysis.md](02-super8-analysis.md).
 > Note: pads send Note-On on **channel 1**, which is exactly what Super8/RiftwayLabsLooper
 > requires. Good fit.
 
+## LOCKED LED design (RiftwayLabsLooper NG)
+
+Grid rows 8..3 (top→down) = Tracks 1..6. Per-track columns:
+
+| Col | Meaning | States |
+|-----|---------|--------|
+| **1** | track STATE (only) | off=empty · **flashing red**=armed · **solid red**=rec · **yellow**=overdub · **green**=play · **dim green**=stopped-w/loop |
+| **6** | solo | **yellow**=solo · off |
+| **7** | mute | **red**=muted · off |
+| **8** | SELECTED track (only) | **blue**=selected · off — shown even when the track is empty (FCB1010 acts on the selected track) |
+
+Column 1 shows state only; column 8 shows selection only — never overloaded.
+Velocities: red=5, yellow=13, green=21, dim green=19, blue=45; flashing via
+Note-On channel 2 (0x91), static via channel 1 (0x90). (19/45 to confirm live.)
+
 ## LED colors (velocity palette, channel 1 = static)
 
 Programmer mode: **Note-On ch1** = static color, **ch2** = flashing,
