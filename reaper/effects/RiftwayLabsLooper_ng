@@ -421,7 +421,7 @@ g_beat = max((g_bar / ts_num)|0, 1);
 // Note-on -> m2 (0..127); CC -> m2+129; PC -> m2+258 (unified learnable key).
 // Act only on non-zero velocity/value so a note-off / CC release doesn't retrigger.
 while (midirecv(g_mo, g_m1, g_m2, g_m3)) (
-  g_m3 != 0 ? ( g_dbg_s = g_m1; g_dbg_d1 = g_m2; g_dbg_d2 = g_m3; );  // monitor (raw, button-down)
+  (g_m1 < 0xF0 && g_m3 != 0) ? ( g_dbg_s = g_m1; g_dbg_d1 = g_m2; g_dbg_d2 = g_m3; );  // monitor: channel-voice presses only (skip clock 0xF8 / active-sense 0xFE / sysex)
   g_ms = g_m1 & 0xF0;
   g_ms == 0xB0 ? ( g_m2 += 129; ) :
   g_ms == 0xC0 ? ( g_m2 += 258; g_m3 = 127; );
