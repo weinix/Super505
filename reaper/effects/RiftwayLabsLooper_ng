@@ -484,6 +484,18 @@ loop(min(g_nch,6),
   gfx_printf("T%d st=%d len=%d bars=%d sy=%d q=%d fx=%d g=%.2f",
     g_gi+1, g_gtp[T_STATE], g_gtp[T_LEN], g_gtp[T_BARS],
     g_gtp[T_SYNC], g_gtp[T_QMODE], g_gtp[T_FIXLEN], g_gtp[T_GAIN]);
+  // live recording progress (bars stays the *finalized* length, 0 until close).
+  // current bar = elapsed samples / bar length; synced tracks use the grid bar,
+  // free/base tracks the project bar. Show n/N when a preset target exists.
+  g_gtp[T_ARMED] ? (
+    gfx_set(0.95,0.7,0.2); gfx_printf("  ARMED");
+  ) : g_gtp[T_STATE]==S_REC ? (
+    g_barlen = (g_gtp[T_MEAS]==M_SYNCED && g_grid_len>0) ? g_grid_len : g_bar;
+    g_cur = floor(g_gtp[T_MEASCNT] / max(g_barlen,1)) + 1;
+    gfx_set(0.95,0.4,0.4);
+    g_gtp[T_FIXLEN] > 0 ? gfx_printf("  REC %d/%d", min(g_cur, g_gtp[T_FIXLEN]), g_gtp[T_FIXLEN])
+                        : gfx_printf("  REC %d", g_cur);
+  );
   g_gi+=1;
 );
 // --- MIDI monitor: press a button to read its raw type/number, then set the
