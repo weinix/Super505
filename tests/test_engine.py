@@ -164,6 +164,51 @@ class TestLengthPresets:
         e.action(3)                      # 4 bars -> shrink 8->4
         assert e.tracks[1].bars == 4 and e.tracks[1].length == 4 * BAR
 
+    def test_preset_toggles_off(self):
+        """pressing the ACTIVE length preset again releases it (fixlen 0) —
+        needed for the no-metronome workflow, where the BASE track must have
+        no preset (a preset would auto-close at project tempo, not yours)."""
+        e = make_engine()
+        e.select(0)
+        e.action(1)
+        assert e.tracks[0].fixlen == 1
+        e.action(1)                      # same preset again -> off
+        assert e.tracks[0].fixlen == 0
+        e.action(2)                      # different preset -> just switches
+        assert e.tracks[0].fixlen == 2
+        e.action(4)
+        assert e.tracks[0].fixlen == 8
+
+    def test_preset_toggle_off_keeps_existing_loop(self):
+        e = make_engine()
+        record_base_1bar(e)              # T0 has fixlen=1, 1-bar loop
+        e.select(0)
+        e.action(1)                      # release the preset
+        assert e.tracks[0].fixlen == 0
+        assert e.tracks[0].length == BAR and e.tracks[0].bars == 1  # loop untouched
+
+    def test_workflow1_base_press_to_press_defines_grid(self):
+        """no metronome, no preset: base track records press-to-press and its
+        EXACT length becomes the grid; a synced preset track then counts the
+        performer's bars, not project-tempo bars."""
+        e = make_engine()
+        e.select(0)
+        assert e.tracks[0].fixlen == 0   # workflow-1 precondition
+        e.press_rec(0)
+        n = int(BAR * 1.37)              # performer's own tempo, not project's
+        e.run(n)
+        e.press_rec(0)
+        assert e.tracks[0].state == PLAY
+        assert e.grid_len == n           # grid IS the performed length
+        # synced 2-bar preset on T1 counts performer bars
+        e.select(1)
+        e.action(2)
+        e.press_rec(1)
+        e.run_until_downbeat()
+        e.run(2 * n + 50)
+        assert e.tracks[1].state == PLAY
+        assert e.tracks[1].length == 2 * n
+
 
 class TestQuantize:
     def test_beat_quantized_start(self):
@@ -474,6 +519,64 @@ class TestTransport:
         e.set_gain(0, 0.5)
         e.clear_all()
         assert e.tracks[0].sync == MASTER and e.tracks[0].gain == 0.5
+
+
+class TestFCB:
+    """FCB1010 foot-controller bindings. The footswitch record/stop/clear/
+    transport actions (FS1/2/3/5/10) reuse press_rec/press_stop/press_clear/
+    press_play/clear_all, already covered above; here we test the two genuinely
+    new bits: FS4 select-next (wrap) and the expression pedals (selected-track
+    volume via set_gain, master/output volume via set_master)."""
+
+    def _record_dc(self, e, i, value, n, sync=FREE):
+        e.select(i)
+        e.tracks[i].sync = sync
+        e.press_rec(i)
+        e.run(n, x=value)
+        e.press_rec(i)                       # close -> play
+
+    def test_select_next_wraps(self):
+        e = make_engine()                    # 6 tracks, selected == -1
+        assert e.selected == -1
+        e.select_next(); assert e.selected == 0        # -1 -> T1
+        for expect in (1, 2, 3, 4, 5):
+            e.select_next(); assert e.selected == expect
+        e.select_next(); assert e.selected == 0        # wraps 6 -> 1
+
+    def test_master_gain_scales_mix(self):
+        e = make_engine()
+        self._record_dc(e, 0, 1.0, 3000)
+        peak_full = max(abs(v) for v in e.run(e.tracks[0].length))
+        e.set_master(0.5)
+        peak_half = max(abs(v) for v in e.run(e.tracks[0].length))
+        e.set_master(0.0)
+        peak_zero = max(abs(v) for v in e.run(e.tracks[0].length))
+        e.set_master(1.0)
+        peak_restore = max(abs(v) for v in e.run(e.tracks[0].length))
+        assert peak_full == pytest.approx(1.0, abs=0.05)
+        assert peak_half == pytest.approx(0.5, abs=0.05)
+        assert peak_zero == pytest.approx(0.0, abs=1e-6)
+        assert peak_restore == pytest.approx(1.0, abs=0.05)
+
+    def test_master_gain_is_global(self):
+        e = make_engine()
+        self._record_dc(e, 0, 1.0, 3000)
+        self._record_dc(e, 1, 1.0, 3000)
+        e.set_master(0.5)                    # (T0 + T1) * 0.5 = (1 + 1) * 0.5 = 1.0
+        n = max(e.tracks[0].length, e.tracks[1].length)
+        peak = max(abs(v) for v in e.run(n))
+        assert peak == pytest.approx(1.0, abs=0.1)
+
+    def test_exp_a_targets_selected_track(self):
+        """Exp A (CC27) -> set_gain(selected, v): affects only the selected track."""
+        e = make_engine()
+        self._record_dc(e, 0, 1.0, 3000)     # selects T0
+        self._record_dc(e, 1, 1.0, 3000)     # selects T1
+        assert e.selected == 1
+        e.set_gain(e.selected, 0.0)          # pull the selected track (T1) to silence
+        peak = max(abs(v) for v in e.run(e.tracks[0].length))
+        assert peak == pytest.approx(1.0, abs=0.1)   # only T0 (unity) contributes
+        assert e.tracks[0].gain == 1.0 and e.tracks[1].gain == 0.0
 
 
 if __name__ == "__main__":

@@ -20,9 +20,11 @@ tags:looper midi sampler
 
 options:gmem=RiftwayLabs no_meter gfx_idle maxmem=33554432 prealloc=*
 
-slider1:g_slider_action=0<0,8,1{-,Len1Bar,Len2Bars,Len4Bars,Len8Bars,SyncFree,SyncMeasure,SyncMaster,SyncToggle}>-Action trigger (selected track, self-resets)
+slider1:g_slider_action=0<0,9,1{-,Len1Bar,Len2Bars,Len4Bars,Len8Bars,SyncFree,SyncMeasure,SyncMaster,SyncToggle,LedRepaint}>Action trigger (selected track, self-resets)
 slider2:g_play_cc=20<0,127,1>-LP Play button CC = AllStart/Stop (0=off; verified LP Pro MK3)
 slider3:g_clear_cc=19<0,127,1>-LP Clear button CC = kill+grid reset (0=off; verified LP Pro MK3)
+slider4:g_volsel_cc=27<0,127,1>-FCB1010 Exp A CC = selected-track volume (0=off)
+slider5:g_volmaster_cc=7<0,127,1>-FCB1010 Exp B CC = master/output volume (0=off)
 
 @init
 g_nch = <? printf("%d", nch) ?>;
@@ -172,13 +174,17 @@ function clear_trk(i) local(tp k) (
 function set_len_bars(n) local(tp oldlen newlen k) (
   g_sel >= 0 ? (
     tp = trk(g_sel);
-    tp[T_FIXLEN] = n;
-    (tp[T_STATE]!=S_REC && tp[T_LEN]>0 && tp[T_BARS]>0 && g_grid_len>0 && n!=tp[T_BARS]) ? (
-      oldlen = tp[T_BARS]*g_grid_len;
-      newlen = min(n*g_grid_len, g_maxlen);
-      newlen > oldlen ? ( k=oldlen; while (k<newlen) ( tp[T_BUF][k]=tp[T_BUF][k%oldlen]; k+=1; ); );
-      tp[T_BARS] = max((newlen/max(g_grid_len,1))|0, 1);
-      tp[T_LEN]  = tp[T_BARS]*g_grid_len;
+    (tp[T_FIXLEN]|0) == n ? (
+      tp[T_FIXLEN] = 0;   // pressing the active preset again releases it (free length)
+    ) : (
+      tp[T_FIXLEN] = n;
+      (tp[T_STATE]!=S_REC && tp[T_LEN]>0 && tp[T_BARS]>0 && g_grid_len>0 && n!=tp[T_BARS]) ? (
+        oldlen = tp[T_BARS]*g_grid_len;
+        newlen = min(n*g_grid_len, g_maxlen);
+        newlen > oldlen ? ( k=oldlen; while (k<newlen) ( tp[T_BUF][k]=tp[T_BUF][k%oldlen]; k+=1; ); );
+        tp[T_BARS] = max((newlen/max(g_grid_len,1))|0, 1);
+        tp[T_LEN]  = tp[T_BARS]*g_grid_len;
+      );
     );
   );
 );
@@ -204,7 +210,8 @@ function rl_action(aid) (
   aid==3 ? set_len_bars(4) :
   aid==4 ? set_len_bars(8) :
   (aid>=5 && aid<=7) ? set_sync(aid-5) :
-  (aid==8 && g_sel>=0) ? set_sync((trk(g_sel)[T_SYNC]+1)%3);
+  (aid==8 && g_sel>=0) ? set_sync((trk(g_sel)[T_SYNC]+1)%3) :
+  aid==9 ? ( memset(mem_led,-1,32); g_led_phase=0; );   // LedRepaint: resend sysex + all pads
 );
 
 function press_rec(i) local(tp st) (
@@ -290,8 +297,19 @@ function advance_grid() local(i tp running) (
   ) : !running ? ( g_grid_pos=0; g_grid_cycle=0; );
 );
 
-function onmsg(m2) local(i tp done cc) (
+function onmsg(m2) local(i tp done cc pc) (
   done = 0;
+  // PC range (normalized as raw+258): FCB1010 footswitches. Act on the SELECTED
+  // track (per the locked design) + global transport. FS6-9 (pc 5-8) unmapped.
+  m2 >= 258 ? (
+    pc = m2 - 258; done = 1;
+    pc==0 ? ( g_sel>=0 ? press_rec(g_sel);  ) :   // FS1: rec->play->overdub cycle
+    pc==1 ? ( g_sel>=0 ? press_stop(g_sel); ) :   // FS2: stop/play toggle
+    pc==2 ? ( g_sel>=0 ? clear_trk(g_sel);  ) :   // FS3: clear selected
+    pc==3 ? ( g_sel = (g_sel+1) % g_nch;    ) :   // FS4: select next (wrap; -1 -> T1)
+    pc==4 ? play_toggle() :                       // FS5: play-all / stop-all
+    pc==9 ? clear_all();                          // FS10: clear-all
+  ) :
   // CC range (normalized as raw+129): LP transport buttons
   m2 >= 129 && m2 < 258 ? (
     cc = m2 - 129;
@@ -381,13 +399,18 @@ ext_noinit==0 ? (
   g_grid_len=0; g_grid_pos=0; g_grid_cycle=0;
   g_sel=-1;
   g_any_solo=0;
+  g_master=1.0;   // master/output volume (FCB1010 Exp B)
 
   mem_sysex[0]=0xF0; mem_sysex[1]=0x00; mem_sysex[2]=0x20; mem_sysex[3]=0x29;
   mem_sysex[4]=0x02; mem_sysex[5]=0x0E; mem_sysex[6]=0x0E; mem_sysex[7]=0x01; mem_sysex[8]=0xF7;
   memset(mem_led, -1, 32);
 );
 
-g_led_phase = 0;   // re-enter Programmer mode after each (re)load
+// Re-enter Programmer mode after each (re)load AND invalidate the send-on-change
+// LED cache: entering Programmer mode blanks every pad, so stale cached colors
+// would otherwise suppress the repaint and leave the grid dark.
+g_led_phase = 0;
+memset(mem_led, -1, 32);
 
 @slider
 (g_slider_action|0) > 0 ? ( rl_action(g_slider_action|0); g_slider_action = 0; );
@@ -421,11 +444,19 @@ g_beat = max((g_bar / ts_num)|0, 1);
 // Note-on -> m2 (0..127); CC -> m2+129; PC -> m2+258 (unified learnable key).
 // Act only on non-zero velocity/value so a note-off / CC release doesn't retrigger.
 while (midirecv(g_mo, g_m1, g_m2, g_m3)) (
-  (g_m1 < 0xF0 && g_m3 != 0) ? ( g_dbg_s = g_m1; g_dbg_d1 = g_m2; g_dbg_d2 = g_m3; );  // monitor: channel-voice presses only (skip clock 0xF8 / active-sense 0xFE / sysex)
+  // monitor: channel-voice presses only (skip clock 0xF8 / active-sense 0xFE / sysex).
+  // PC (0xC0) has no 2nd data byte (m3==0) -> must pass explicitly or FCB1010
+  // footswitch presses never show here even though they dispatch fine.
+  (g_m1 < 0xF0 && (g_m3 != 0 || (g_m1 & 0xF0) == 0xC0)) ? ( g_dbg_s = g_m1; g_dbg_d1 = g_m2; g_dbg_d2 = g_m3; );
   g_ms = g_m1 & 0xF0;
-  g_ms == 0xB0 ? ( g_m2 += 129; ) :
-  g_ms == 0xC0 ? ( g_m2 += 258; g_m3 = 127; );
-  ((g_ms == 0x90 || g_ms == 0xB0 || g_ms == 0xC0) && g_m3 != 0) ? onmsg(g_m2);
+  // FCB1010 expression pedals: continuous CC -> volume. Handled here (not onmsg)
+  // because they need the VALUE and must act at value 0 too (past the press gate).
+  (g_ms == 0xB0 && g_volsel_cc    > 0 && g_m2 == g_volsel_cc)    ? ( g_sel >= 0 ? trk(g_sel)[T_GAIN] = g_m3 / 127; ) :
+  (g_ms == 0xB0 && g_volmaster_cc > 0 && g_m2 == g_volmaster_cc) ? ( g_master = g_m3 / 127; ) : (
+    g_ms == 0xB0 ? ( g_m2 += 129; ) :
+    g_ms == 0xC0 ? ( g_m2 += 258; g_m3 = 127; );
+    ((g_ms == 0x90 || g_ms == 0xB0 || g_ms == 0xC0) && g_m3 != 0) ? onmsg(g_m2);
+  );
 );
 
 // --- solo mask + arm-bridge gmem publish ---
@@ -471,7 +502,7 @@ g_led_phase == 0 ? (
 advance_grid();
 g_si = 0;
 loop(g_nch,
-  spl(g_si) = track_process(g_si, spl(g_si));
+  spl(g_si) = track_process(g_si, spl(g_si)) * g_master;
   g_si += 1;
 );
 

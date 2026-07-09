@@ -101,6 +101,7 @@ class Engine:
         self.maxlen = cap
         self.tracks = [Track(cap) for _ in range(nch)]
         self.selected = -1
+        self.master_gain = 1.0   # master/output volume (FCB1010 Exp B)
         self.grid_len = 0        # base measure in samples (0 until established)
         self.grid_pos = 0
         self.grid_cycle = 0
@@ -128,8 +129,17 @@ class Engine:
     def select(self, i):
         self.selected = i
 
+    def select_next(self):
+        """FCB1010 FS4: step the selection to the next track, wrapping.
+        selected == -1 -> track 0, matching the JSFX (g_sel+1) % g_nch."""
+        self.selected = (self.selected + 1) % len(self.tracks)
+
     def set_gain(self, i, g):
         self.tracks[i].gain = g
+
+    def set_master(self, g):
+        """FCB1010 Exp B: master/output volume, applied to the final mix."""
+        self.master_gain = g
 
     def toggle_mute(self, i):
         self.tracks[i].mute = not self.tracks[i].mute
@@ -357,6 +367,9 @@ class Engine:
         if self.selected < 0:
             return
         t = self.tracks[self.selected]
+        if int(t.fixlen) == n:
+            t.fixlen = 0        # pressing the active preset again releases it (free length)
+            return
         t.fixlen = n
         if t.state != REC and t.length > 0 and t.bars > 0 and self.grid_len > 0 and n != t.bars:
             oldlen = t.bars * self.grid_len
@@ -408,7 +421,7 @@ class Engine:
         for i, t in enumerate(self.tracks):
             out += self._track_process(i, t, x, any_solo)
         self.now += 1
-        return out
+        return out * self.master_gain
 
     def _track_process(self, i, t, x, any_solo):
         if t.state == EMPTY and not t.armed:

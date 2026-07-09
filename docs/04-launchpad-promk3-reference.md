@@ -47,6 +47,32 @@ Snooped via `tools/print_launchpad_key.sh` (2026-07-07). Outer-ring buttons send
 Wired as the `g_play_cc` / `g_clear_cc` slider defaults in `RiftwayLabsLooper_ng`.
 The engine acts on press only (non-zero value).
 
+## FCB1010 foot controller map (live, into UR22C MIDI IN) — VERIFIED 2026-07-08
+
+Snooped via `tools/print_launchpad_key.sh UR22C`, wired into the NG engine and
+**verified working live in REAPER** (2026-07-08). Footswitches send
+**Program Change** on ch 1; expression pedals send **Control Change**. The foot
+controller does only the hands-busy, time-critical actions on the **selected**
+track (per the locked LED design, col 8 = selected) plus global transport —
+selection/mute/solo/length-sync presets stay on the Launchpad.
+
+| Switch | Sends | Function | Acts on |
+|--------|-------|----------|---------|
+| **FS1** | PC 0 | **Record → Play → Overdub** cycle (empty→rec, rec→play, play→overdub, overdub→play, stopped→play) | selected track |
+| **FS2** | PC 1 | **Stop / Play** toggle | selected track |
+| **FS3** | PC 2 | **Clear** | selected track |
+| **FS4** | PC 3 | **Select next track** (wrap 1→6→1; none→T1) | — |
+| **FS5** | PC 4 | **Play-all / Stop-all** (= LP Play, CC 20) | all |
+| **FS10** | PC 9 | **Clear-all** (= LP Clear, CC 19) — parked far right | all |
+| FS6–9 | PC 5–8 | *unmapped* (room to grow) | — |
+| **Exp A** | CC 27 | **Selected-track volume** (0..1) | selected track |
+| **Exp B** | CC 7 | **Master / output volume** (0..1) | all |
+
+Wired in `RiftwayLabsLooper_ng`: PC dispatched in `onmsg` (normalized `raw+258`);
+expression CCs handled inline in `@block` (need the value + must act at value 0),
+assignable via the `g_volsel_cc` / `g_volmaster_cc` sliders. Fresh session: press
+FS4 (or a Launchpad col-8 pad) first so FS1 has a selected track to record.
+
 ```
  81 82 83 84 85 86 87 88     <- top pad row
  71 72 73 74 75 76 77 78
